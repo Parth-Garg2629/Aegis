@@ -1,9 +1,9 @@
 ---
-Status: Draft
+Status: Final Draft
 Project: SIH 2026 — PS 26171
 Document: Product Requirements Document
-Version: 1.0
-Last Updated: 2026-09-17
+Version: 1.1
+Last Updated: 2026-09-18
 ---
 
 # AEGIS — Product Requirements Document
@@ -12,11 +12,11 @@ Last Updated: 2026-09-17
 
 **Product Name:** AEGIS (Agentic Engine for Guarded Intelligent Surfing)
 
-**One-Line Description:** A privacy-preserving browser agent that uses on-device visual perception to understand web pages, sanitize sensitive information locally, and delegate reasoning to a remote VLM — ensuring raw user data never leaves the device.
+**One-Line Description:** A privacy-preserving browser agent that uses on-device visual perception and DOM analysis to understand web pages, sanitize sensitive information locally, and delegate reasoning to a remote VLM — ensuring raw user data never leaves the device.
 
 **Problem Being Solved:** Current AI-powered browser agents require sending raw screenshots or full page content to remote servers for processing. This exposes sensitive user data — passwords, financial details, personal identifiers, faces — to third-party infrastructure. Users who need AI assistance with complex web workflows are forced to choose between utility and privacy.
 
-**Proposed Solution:** A Manifest V3 browser extension that runs a lightweight vision model directly in the browser (via WebGPU/WASM) to perceive and understand the current screen state. Before any data leaves the device, the extension detects and redacts sensitive visual and textual information. Only a sanitized, structured representation of the screen is transmitted to a server-side Vision-Language Model, which reasons about the task and returns actionable browser commands. The extension then executes those commands locally, creating a continuous perception-reasoning-action loop.
+**Proposed Solution:** A Manifest V3 browser extension that combines DOM analysis, lightweight on-device visual ML, and heuristic PII detection to perceive and understand the current screen state. Before any data leaves the device, the extension detects and redacts sensitive visual and textual information through a local fusion and sanitization layer. Only a sanitized screenshot and a sanitized structured schema are transmitted to a server-side Vision-Language Model, which reasons about the task and returns a single structured browser command. The extension validates and executes that command locally, creating a continuous perception-reasoning-action loop.
 
 **Core Value Proposition:** Users get the full power of a VLM-driven browser agent without ever exposing their raw screen content, PII, or sensitive data to any remote system. Privacy is enforced architecturally, not by policy.
 
@@ -44,7 +44,8 @@ The tension arises because obtaining this visual context typically means capturi
 
 DOM-only approaches fail in several common scenarios:
 
-- Canvas-rendered content, iframes, and shadow DOM elements are invisible to DOM parsing.
+- Canvas-rendered content and shadow DOM elements may not be fully accessible through standard DOM traversal.
+- Cross-origin iframes are inaccessible to the extension's content script due to browser security restrictions (same-origin policy), making their content invisible to DOM analysis alone.
 - Visual layout and spatial relationships (e.g., which label belongs to which input field) are lost in raw DOM text.
 - Dynamic, JavaScript-heavy pages may not expose meaningful semantic information through DOM alone.
 - A visual model can understand a page the way a user sees it, enabling more accurate and robust agent decisions.
@@ -92,7 +93,7 @@ Developers building browser-agent pipelines who need a reference implementation 
 | P2 | Users cannot selectively control what information an AI agent can see. | All-or-nothing data sharing forces users to either trust fully or not use the tool at all. |
 | P3 | Complex multi-step web workflows (tax filing, insurance claims, government forms) are tedious and error-prone without assistance. | Users spend excessive time on tasks that an agent could handle in seconds. |
 | P4 | Current PII detection is limited to text regex and misses visual sensitive content. | Faces in profile pictures, scanned ID documents, and QR codes are transmitted unredacted. |
-| P5 | Browser agents that rely solely on DOM parsing fail on visually complex or dynamically rendered pages. | The agent cannot understand canvas elements, complex CSS layouts, or iframe content, leading to incorrect actions. |
+| P5 | Browser agents that rely solely on DOM parsing fail on visually complex or dynamically rendered pages. | The agent cannot understand canvas elements, complex CSS layouts, or cross-origin iframe content, leading to incorrect actions or inability to act. |
 | P6 | Users have no visibility into what data an AI agent is sending to the server. | Lack of transparency erodes trust. |
 | P7 | Heavy AI models cannot run on typical user hardware. | Users without powerful GPUs are excluded from on-device AI processing. |
 
@@ -102,12 +103,12 @@ Developers building browser-agent pipelines who need a reference implementation 
 
 | # | Goal | Measurable Indicator |
 |---|------|---------------------|
-| G1 | Accurately perceive the visual state of a web page using an on-device model. | Visual context accuracy ≥ threshold defined by evaluation metric (25% weight in SIH scoring). |
-| G2 | Detect sensitive/PII content in the visual context with high recall and precision. | Recall and precision for PII detection meet evaluation metric (20% weight). |
-| G3 | Redact detected PII before any data leaves the device. | Redaction precision meets evaluation metric (20% weight). Zero raw PII transmitted in test scenarios. |
-| G4 | Maintain acceptable client-side resource utilization. | CPU/GPU/memory usage within evaluation metric (20% weight). Browser remains responsive during agent operation. |
-| G5 | Achieve practical end-to-end latency for a complete perception-reasoning-action cycle. | Total loop latency meets evaluation metric (15% weight). |
-| G6 | Complete a demonstrable end-to-end user task through the agent pipeline. | At least one multi-step task (e.g., form filling) completed autonomously during the SIH demo. |
+| G1 | Accurately perceive the visual state of a web page using on-device perception. | Evaluated against SIH metric 1 (25% weight): accuracy of visual context from screen. |
+| G2 | Detect sensitive/PII content with high recall and precision. | Evaluated against SIH metric 2 (20% weight): recall and precision for PII detection. |
+| G3 | Redact detected PII before any data leaves the device. | Evaluated against SIH metric 3 (20% weight): precision of redaction. Zero raw PII transmitted in test scenarios. |
+| G4 | Maintain acceptable client-side resource utilization. | Evaluated against SIH metric 4 (20% weight): client-side resource utilization. Browser remains responsive during agent operation. |
+| G5 | Achieve practical end-to-end latency for a complete perception-reasoning-action cycle. | Evaluated against SIH metric 5 (15% weight): overall end-to-end latency. |
+| G6 | Complete a demonstrable end-to-end user task through the agent pipeline. | At least one multi-step task completed autonomously during the SIH demo. |
 
 ---
 
@@ -144,39 +145,63 @@ This vision guides architectural decisions in the prototype but does not create 
 
 ## 8. Core Product Concept
 
-AEGIS operates as a continuous loop of six stages:
+AEGIS operates as a continuous loop of six stages. The on-device perception layer is not a single model but a multi-signal system that combines DOM analysis, lightweight visual ML, and heuristic PII detection before making sanitization decisions.
 
 ```
 User states a goal
        ↓
 [1] CAPTURE — The extension observes the active tab. When a meaningful change
-    occurs (page load, form render, navigation), it captures the visual state
-    (screenshot) and the structural state (DOM snapshot).
+    occurs (page load, form render, navigation), it captures both the visual
+    state (screenshot) and the structural state (DOM snapshot).
        ↓
-[2] PERCEIVE & DETECT — A lightweight on-device vision model analyzes the
-    captured state. It identifies UI elements, text regions, and — critically —
-    sensitive content: faces, password fields, PII patterns (Aadhaar, PAN,
-    card numbers), personal photos, QR codes.
+[2] PERCEIVE & DETECT — Three complementary signal sources analyze the
+    captured state on-device:
+
+    A. DOM / Deterministic Analysis — Extracts element types, input types,
+       labels, positions, interactive state, structural relationships, and
+       other browser-provided metadata. Identifies password/OTP fields by
+       their HTML attributes.
+
+    B. Lightweight Visual ML — A small vision model (ViT/YOLO-class) running
+       in-browser via WebGPU/WASM analyzes the screenshot for visual UI
+       elements, layout, faces, and visual regions not adequately represented
+       by DOM alone.
+
+    C. Heuristic PII Detection — Deterministic pattern matchers scan text
+       content for Aadhaar numbers, PAN numbers, credit/debit card numbers,
+       email addresses, phone numbers, and other explicitly supported
+       sensitive patterns.
+
+    These signals are combined in a local fusion/decision layer that produces
+    a unified sensitivity map of the page.
        ↓
-[3] SANITIZE & TRANSMIT — Detected sensitive regions are redacted locally
-    (blurred, masked, or semantically generalized). A structured, sanitized
-    representation of the page — containing layout, element types, non-sensitive
-    text, and redaction markers — is sent to the server. No raw screenshot or
-    raw PII crosses the network boundary.
+[3] SANITIZE & TRANSMIT — Using the sensitivity map, detected sensitive
+    regions are redacted locally: faces and visual PII are blurred/masked in
+    the screenshot, and sensitive text is replaced with typed placeholders in
+    the structured schema. Both the sanitized screenshot and the sanitized
+    structured schema are transmitted to the server. No raw screenshot or raw
+    PII crosses the network boundary. The actual webpage the user sees remains
+    unredacted — redaction applies only to the transmitted representation.
        ↓
-[4] REASON — The server-side VLM receives the sanitized context along with the
-    user's goal. It reasons about the current state and determines the single
-    next action required (e.g., "click the Submit button", "type 'Delhi' in the
-    destination field").
+[4] REASON — The server-side VLM receives the sanitized screenshot, the
+    sanitized schema, and the user's goal. It reasons about the current state
+    and determines the single next action required (e.g., "click the Submit
+    button", "type 'Delhi' in the destination field"). It returns one
+    structured action command.
        ↓
-[5] VALIDATE — Back on the device, the proposed action is checked against a
-    safety schema. Routine actions (scroll, click navigation links) proceed
-    automatically. High-risk actions (submitting a payment, deleting data) pause
-    and require explicit user confirmation.
+[5] VALIDATE — Back on the device, the proposed action is checked in two
+    stages:
+    a. Schema validity — Does the action conform to the closed-vocabulary
+       action schema (click, type, scroll, select, hover, wait, done, fail)?
+    b. Safety/risk check — Is this a high-risk action (payment submission,
+       account deletion, sensitive form submission)? If so, the user is
+       asked to confirm before proceeding.
+    Invalid or blocked actions are rejected.
        ↓
-[6] EXECUTE — The extension performs the validated action on the real,
-    unredacted page. The page state changes, the MutationObserver detects the
-    change, and the loop returns to Step 1.
+[6] EXECUTE — Once cleared, the extension performs the validated action on
+    the real, unredacted page via content script DOM APIs. The page state
+    changes, the MutationObserver detects the change, and the loop returns
+    to Step 1.
 ```
 
 This loop repeats until the task is complete, the user cancels, or the agent determines it cannot proceed.
@@ -190,27 +215,28 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 | ID | Feature | Description |
 |----|---------|-------------|
 | F1 | **Screen State Capture** | Capture the visual screenshot and DOM structure of the active tab when meaningful changes occur. |
-| F2 | **On-Device Visual Perception** | Run a lightweight vision model (ViT/YOLO-class) in the browser via WebGPU/WASM to understand UI elements and screen layout. |
-| F3 | **Sensitive Information Detection** | Detect faces, password fields, and common PII patterns (Aadhaar, PAN, credit card numbers, email addresses, phone numbers) in the captured state. |
-| F4 | **Local Redaction/Sanitization** | Blur, mask, or generalize detected sensitive regions before any data leaves the device. Generate a sanitized structured representation. |
-| F5 | **Sanitized Context Transmission** | Send only the sanitized page representation to the server via WebSocket. |
-| F6 | **Server-Side VLM Reasoning** | The server-side VLM interprets the sanitized context and the user's goal, then returns a structured action command. |
-| F7 | **Action Safety Validation** | Validate the VLM's proposed action against a closed-vocabulary action schema. Flag high-risk actions for user confirmation. |
-| F8 | **Browser Action Execution** | Execute validated actions (click, type, scroll, select) on the real page via content script DOM APIs. |
-| F9 | **Goal Input UI** | A simple extension popup where the user types their goal and monitors agent progress. |
-| F10 | **Perception-Action Loop** | Continuously cycle through capture → perceive → sanitize → reason → validate → execute until the task completes. |
+| F2 | **On-Device Visual Perception** | Run a lightweight vision model in the browser via WebGPU/WASM to understand visual UI elements, layout, and regions not adequately represented by DOM. |
+| F3 | **DOM Analysis** | Extract element types, input types, labels, positions, interactive state, and structural relationships from the page DOM. Identify password and OTP fields deterministically by their HTML attributes. |
+| F4 | **Sensitive Information Detection** | Detect sensitive content through multiple signal sources: face detection via visual ML, password/OTP fields via DOM analysis, and PII text patterns (Aadhaar, PAN, credit card numbers, email addresses, phone numbers) via heuristic/regex detection. |
+| F5 | **Local Fusion & Sanitization** | Combine signals from visual ML, DOM analysis, and heuristic PII detection into a unified sensitivity map. Redact detected sensitive regions locally: blur/mask visual regions in the screenshot and replace sensitive text with typed placeholders in the structured schema. |
+| F6 | **Sanitized Context Transmission** | Send both the sanitized screenshot and the sanitized structured schema to the server via WebSocket. Raw screenshots and raw PII never cross the network boundary. |
+| F7 | **Server-Side VLM Reasoning** | The server-side VLM interprets the sanitized context (screenshot + schema) and the user's goal, then returns a single structured action command. |
+| F8 | **Action Validation** | Validate the VLM's proposed action in two stages: (a) schema validity against the closed-vocabulary action set, and (b) safety/risk assessment. Flag high-risk actions for user confirmation. Reject invalid or blocked actions. |
+| F9 | **Browser Action Execution** | Execute validated actions (click, type, scroll, select, hover) on the real, unredacted page via content script DOM APIs. |
+| F10 | **Goal Input UI** | A simple extension popup where the user types their goal and monitors agent progress. |
+| F11 | **Perception-Action Loop** | Continuously cycle through capture → perceive → sanitize → reason → validate → execute until the task completes, the user cancels, or the agent cannot proceed. |
 
 ### 9.2 Future Scope (Post-SIH)
 
-| ID | Feature | Description |
-|----|---------|-------------|
-| F11 | Cryptographic capability tokens for action validation. |
-| F12 | Full OCR and document layout analysis on-device. |
-| F13 | Multi-tab awareness and cross-tab workflows. |
-| F14 | Configurable privacy policies (user-defined redaction rules). |
-| F15 | Agent action audit log with visual replay. |
-| F16 | Firefox and Safari extension support. |
-| F17 | Adaptive model selection based on device capability. |
+| ID | Feature |
+|----|---------|
+| F12 | Cryptographic capability tokens for tamper-proof action validation. |
+| F13 | Full OCR and document layout analysis on-device. |
+| F14 | Multi-tab awareness and cross-tab workflows. |
+| F15 | Configurable privacy policies (user-defined redaction rules). |
+| F16 | Agent action audit log with visual replay. |
+| F17 | Firefox and Safari extension support. |
+| F18 | Adaptive model selection based on device capability. |
 
 ---
 
@@ -220,28 +246,28 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 
 1. User opens a web page and activates the AEGIS extension.
 2. User types a goal into the popup (e.g., "Fill out this application form with my saved details").
-3. The extension captures the current screen state.
-4. The on-device model perceives the page layout and UI elements.
+3. The extension captures the current screen state (screenshot + DOM).
+4. The on-device perception layer analyzes the page: DOM analysis extracts element structure, visual ML identifies layout, heuristic detection scans for PII patterns.
 5. No sensitive information is detected on this particular page.
-6. The full structured context is sent to the server.
+6. The full sanitized context (screenshot + structured schema) is sent to the server.
 7. The server VLM determines the next action: "Click the 'Start Application' button."
-8. The action passes the safety check (low-risk click).
+8. The action passes schema validation and the safety check (low-risk click).
 9. The extension clicks the button. The page navigates.
 10. The loop restarts on the new page.
 
 ### Flow B: Page Containing Sensitive Information
 
 1. The agent navigates to a page displaying the user's Aadhaar number, a profile photo, and a bank account field.
-2. The on-device model detects: face region, Aadhaar number pattern, bank account number pattern.
-3. The extension blurs the face, replaces the Aadhaar number with `[REDACTED_ID]`, and masks the bank account number.
-4. The sanitized context is sent to the server. The VLM sees `[REDACTED_ID]` where the Aadhaar was and a blurred region where the face was.
+2. The on-device perception layer detects: a face region (visual ML), password/sensitive input fields (DOM analysis), Aadhaar and bank account number patterns (heuristic PII detection).
+3. The local fusion layer combines these signals into a sensitivity map. The sanitization layer blurs the face in the screenshot, replaces the Aadhaar number with `[REDACTED_AADHAAR]` in the schema, and masks the bank account number.
+4. The sanitized screenshot and sanitized schema are sent to the server. The VLM sees `[REDACTED_AADHAAR]` where the Aadhaar was and a blurred region where the face was.
 5. The VLM can still reason about the page structure (e.g., "The Aadhaar field is pre-filled, proceed to the next section") without seeing the actual data.
 6. The agent continues.
 
 ### Flow C: Agent Requiring Visual Understanding
 
-1. The agent reaches a page with a CAPTCHA, a complex CSS-rendered chart, or a canvas-based UI element that is invisible in the DOM.
-2. The on-device vision model perceives the visual layout and identifies the interactive elements.
+1. The agent reaches a page with a complex CSS-rendered layout, a canvas-based UI element, or cross-origin iframe content that is inaccessible to the content script's DOM analysis due to browser same-origin policy.
+2. The on-device visual ML perceives the visual layout from the screenshot and identifies interactive elements that DOM analysis alone could not capture.
 3. The sanitized visual context (with sensitive parts redacted) is sent to the server.
 4. The VLM interprets the visual context and decides the next action.
 5. If the VLM cannot determine the action with sufficient confidence, it returns an uncertainty signal rather than a guess.
@@ -249,15 +275,16 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 ### Flow D: User Approval Required
 
 1. The VLM returns an action: "Click the 'Confirm Payment' button."
-2. The action validator flags this as a high-risk action (matches the "payment/submit" risk category).
-3. The extension pauses and shows a confirmation dialog to the user: "The agent wants to confirm a payment. Allow?"
-4. The user reviews and either approves (action executes) or denies (agent stops or re-plans).
+2. The action passes schema validation (it is a valid "click" action).
+3. The safety/risk check flags this as a high-risk action (matches the "payment/submit" risk category).
+4. The extension pauses and shows a confirmation dialog to the user: "The agent wants to confirm a payment. Allow?"
+5. The user reviews and either approves (action executes) or denies (agent stops or re-plans).
 
 ### Flow E: Failure or Uncertainty
 
 1. The VLM returns an action referencing a UI element that does not exist on the current page (hallucination).
 2. The content script fails to locate the target element.
-3. The extension reports the failure back to the server with an updated screen capture.
+3. The extension reports the failure back to the server with an updated sanitized screen capture.
 4. The VLM re-evaluates and either proposes a corrected action or signals that it cannot proceed.
 5. After a configurable number of consecutive failures, the agent pauses and informs the user.
 
@@ -268,28 +295,29 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-01 | The extension SHALL capture the visible area of the active tab as a screenshot when a meaningful DOM change is detected. | MVP |
-| FR-02 | The extension SHALL extract a structured DOM representation of the active tab including element types, positions, text content, and interactive state. | MVP |
-| FR-03 | DOM change detection SHALL be debounced to avoid excessive captures (target: ~200ms debounce interval). | MVP |
-| FR-04 | The extension SHALL run a lightweight vision model on-device using WebGPU (with WASM fallback) to analyze the captured screenshot. | MVP |
-| FR-05 | The on-device model SHALL detect and localize UI elements (buttons, input fields, links, images, text regions) in the screenshot. | MVP |
-| FR-06 | The on-device model SHALL detect faces in the screenshot. | MVP |
-| FR-07 | The extension SHALL detect common PII patterns in text content: Aadhaar numbers, PAN numbers, credit/debit card numbers, email addresses, phone numbers. | MVP |
-| FR-08 | The extension SHALL detect password and OTP input fields regardless of their rendered visual style. | MVP |
-| FR-09 | The extension SHALL redact detected sensitive regions by applying visual obfuscation (blur, black-box) to the screenshot before transmission. | MVP |
-| FR-10 | The extension SHALL replace detected PII text with typed placeholders (e.g., `[REDACTED_AADHAAR]`, `[REDACTED_EMAIL]`) in the structured DOM representation. | MVP |
-| FR-11 | The extension SHALL transmit only the sanitized screenshot and sanitized DOM representation to the server. | MVP |
-| FR-12 | Communication between the extension and server SHALL use a persistent bidirectional WebSocket connection. | MVP |
-| FR-13 | The server SHALL receive the sanitized context and the user's stated goal, and pass them to a VLM for reasoning. | MVP |
-| FR-14 | The VLM SHALL return a structured action command specifying: action type, target element identifier, and any required input value. | MVP |
-| FR-15 | The action command format SHALL conform to a closed-vocabulary schema (allowed actions: click, type, scroll, select, hover, wait, done, fail). | MVP |
-| FR-16 | The extension SHALL validate received action commands against the closed-vocabulary schema before execution. | MVP |
-| FR-17 | Actions classified as high-risk (payment submission, account deletion, form submission containing financial data) SHALL require explicit user confirmation before execution. | MVP |
-| FR-18 | The extension SHALL execute validated actions on the real, unredacted page using content script DOM APIs. | MVP |
-| FR-19 | After action execution, the extension SHALL re-enter the capture-perceive-sanitize-reason-validate-execute loop. | MVP |
-| FR-20 | The extension SHALL provide a popup UI where the user can input a goal, view agent status, and cancel the agent. | MVP |
-| FR-21 | The agent loop SHALL terminate when the VLM returns a "done" signal, the user cancels, or a maximum step count is reached. | MVP |
-| FR-22 | The extension SHALL handle action execution failures (element not found, element not interactable) by reporting the failure to the server for re-evaluation. | MVP |
-| FR-23 | The server SHALL support both local model inference (via Ollama or equivalent) and cloud-hosted API inference for the VLM, selectable via configuration. | MVP |
+| FR-02 | The extension SHALL extract a structured DOM representation of the active tab including element types, input types, positions, labels, text content, interactive state, and structural relationships. | MVP |
+| FR-03 | DOM change detection SHALL be debounced to avoid excessive captures. Proposed engineering target: ~200ms debounce interval. | MVP |
+| FR-04 | The extension SHALL run a lightweight vision model on-device using WebGPU (with WASM fallback) to analyze the captured screenshot for visual UI elements, layout, and faces. | MVP |
+| FR-05 | The on-device visual ML model SHALL detect and localize visual UI elements (buttons, input fields, links, images, text regions) in the screenshot. | MVP |
+| FR-06 | The on-device perception layer SHALL detect faces in the screenshot using a dedicated face detection model. | MVP |
+| FR-07 | The extension SHALL detect password and OTP input fields deterministically through DOM analysis (HTML input types, element attributes, associated labels). | MVP |
+| FR-08 | The extension SHALL detect common PII patterns in text content using heuristic/regex detection: Aadhaar numbers, PAN numbers, credit/debit card numbers, email addresses, phone numbers. | MVP |
+| FR-09 | The extension SHALL combine signals from DOM analysis, visual ML, and heuristic PII detection in a local fusion layer to produce a unified sensitivity map before sanitization. | MVP |
+| FR-10 | The extension SHALL redact detected sensitive visual regions by applying visual obfuscation (blur, black-box) to the screenshot before transmission. | MVP |
+| FR-11 | The extension SHALL replace detected PII text with typed placeholders (e.g., `[REDACTED_AADHAAR]`, `[REDACTED_EMAIL]`) in the structured schema before transmission. | MVP |
+| FR-12 | The extension SHALL transmit both the sanitized screenshot and the sanitized structured schema to the server. Raw screenshots and raw PII SHALL NOT be transmitted. | MVP |
+| FR-13 | Communication between the extension and server SHALL use a persistent bidirectional WebSocket connection. | MVP |
+| FR-14 | The server SHALL receive the sanitized context (screenshot + schema) and the user's stated goal, and pass them to a VLM for reasoning. | MVP |
+| FR-15 | The VLM SHALL return a single structured action command specifying: action type, target element identifier, and any required input value. | MVP |
+| FR-16 | The action command format SHALL conform to a closed-vocabulary schema. Allowed actions: click, type, scroll, select, hover, wait, done, fail. | MVP |
+| FR-17 | The extension SHALL validate received action commands in two stages: (a) schema validity against the closed-vocabulary action set, and (b) safety/risk assessment against defined risk categories. | MVP |
+| FR-18 | Actions classified as high-risk (payment submission, account deletion, form submission containing financial data) SHALL require explicit user confirmation before execution. | MVP |
+| FR-19 | The extension SHALL execute validated actions on the real, unredacted page using content script DOM APIs. Redaction applies only to the transmitted representation, not to the local webpage. | MVP |
+| FR-20 | After action execution, the extension SHALL re-enter the capture → perceive → sanitize → reason → validate → execute loop. | MVP |
+| FR-21 | The extension SHALL provide a popup UI where the user can input a goal, view agent status, and cancel the agent. | MVP |
+| FR-22 | The agent loop SHALL terminate when the VLM returns a "done" signal, the user cancels, or a maximum step count is reached. | MVP |
+| FR-23 | The extension SHALL handle action execution failures (element not found, element not interactable) by reporting the failure to the server with an updated sanitized screen capture for re-evaluation. | MVP |
+| FR-24 | The server SHALL support both local model inference (via Ollama or equivalent) and cloud-hosted API inference for the VLM, selectable via configuration. | MVP |
 
 ---
 
@@ -301,14 +329,14 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 | NFR-02 | **Privacy** | All PII detection and redaction SHALL occur on-device before network transmission. |
 | NFR-03 | **Security** | The WebSocket connection between client and server SHALL use WSS (WebSocket Secure) in any non-localhost deployment. |
 | NFR-04 | **Security** | The extension SHALL follow Manifest V3 security constraints including the prohibition of remote code execution and adherence to Content Security Policy. |
-| NFR-05 | **Latency** | The full perception-reasoning-action loop SHOULD complete within a timeframe that enables practical task completion (proposed target: < 5 seconds per step for the SIH demo). |
+| NFR-05 | **Latency** | The full perception-reasoning-action loop SHOULD complete within a timeframe that enables practical task completion. See Section 15 for proposed engineering targets. |
 | NFR-06 | **Resource Usage** | On-device ML inference SHALL NOT cause the browser tab to become unresponsive or crash on a machine with 8GB RAM and no dedicated GPU. |
-| NFR-07 | **Resource Usage** | The extension's idle memory footprint (no active task) SHOULD remain under 100MB. |
+| NFR-07 | **Resource Usage** | The extension's idle memory footprint (no active task) SHOULD remain minimal. See Section 15 for proposed engineering targets. |
 | NFR-08 | **Reliability** | The agent SHALL degrade gracefully when the server is unreachable (inform the user, do not crash). |
 | NFR-09 | **Reliability** | The agent SHALL not enter an infinite loop. A maximum step count SHALL be enforced. |
 | NFR-10 | **Compatibility** | The extension SHALL function on Chrome 116+ and Edge 116+ (WebGPU support baseline). |
 | NFR-11 | **Maintainability** | Client and server components SHALL be independently deployable and versioned. |
-| NFR-12 | **Transparency** | The extension SHOULD display to the user what data is being sent to the server (e.g., a preview of the sanitized context). |
+| NFR-12 | **Transparency** | The extension SHOULD display to the user what sanitized data is being sent to the server (e.g., a preview of the sanitized screenshot and schema). |
 | NFR-13 | **Scalability** | The server architecture SHALL support swapping the VLM model without modifying the client extension. |
 
 ---
@@ -319,12 +347,12 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 |----|-------------|
 | PV-01 | Raw screenshots captured by `chrome.tabs.captureVisibleTab` SHALL remain in the extension's local memory and SHALL NOT be transmitted, stored persistently, or made accessible to web page scripts. |
 | PV-02 | Detected PII (text patterns, face regions, sensitive form field values) SHALL be redacted on-device before the sanitized representation is constructed. |
-| PV-03 | The sanitized representation sent to the server SHALL contain only: redacted/blurred visual regions, structural layout information, non-sensitive text, element type/position data, and typed redaction placeholders. |
+| PV-03 | The sanitized representation sent to the server SHALL consist of: (a) a sanitized screenshot with sensitive visual regions blurred/masked, and (b) a sanitized structured schema with sensitive text replaced by typed placeholders. Together these contain only: redacted visual regions, structural layout information, non-sensitive text, element type/position data, and typed redaction placeholders. |
 | PV-04 | The server SHALL NOT request, and the client SHALL NOT provide, raw unredacted data at any point in the protocol. |
-| PV-05 | The user SHALL be able to view what sanitized data is being sent to the server before transmission begins (transparency requirement). |
+| PV-05 | The user SHALL be able to view what sanitized data is being sent to the server before or during transmission (transparency requirement). |
 | PV-06 | No user data (raw or sanitized) SHALL be persisted on the server beyond the duration of the active WebSocket session, unless explicitly configured otherwise. |
 | PV-07 | The extension SHALL NOT collect or transmit browsing history, cookies, authentication tokens, or any data beyond the sanitized representation of the currently active tab. |
-| PV-08 | If the on-device model's confidence in PII detection is below a configurable threshold for a given region, the system SHOULD err on the side of redacting that region (fail-safe). |
+| PV-08 | If the on-device perception layer's confidence in PII detection is below a configurable threshold for a given region, the system SHOULD err on the side of redacting that region (fail-safe over-redaction). |
 
 ---
 
@@ -345,57 +373,60 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 ## 15. Performance Requirements
 
 > [!NOTE]
-> Where exact numerical targets cannot be derived from the problem statement, values are marked as **proposed engineering targets** to be validated during development.
+> The SIH evaluation criteria allocate 20% to client-side resource utilization and 15% to overall end-to-end latency. The specific numerical targets below are **proposed engineering targets** to be validated during development. They are not official SIH requirements.
 
-| ID | Metric | Target | Basis |
-|----|--------|--------|-------|
-| PF-01 | On-device perception latency (capture + model inference + redaction) | < 2 seconds (proposed) | Derived from the need to keep total loop latency practical. |
-| PF-02 | Server VLM reasoning latency (receive sanitized context → return action) | < 3 seconds (proposed) | Dependent on VLM model size and hosting. Cloud-hosted API should meet this. |
-| PF-03 | Total end-to-end loop latency (one complete cycle) | < 5 seconds (proposed) | 15% of SIH evaluation is on overall latency. |
-| PF-04 | Extension active memory usage (during inference) | < 500MB (proposed) | Must remain usable on 8GB RAM machines alongside normal browsing. |
-| PF-05 | Extension idle memory usage | < 100MB (proposed) | Should not noticeably impact browser performance when not actively running a task. |
-| PF-06 | CPU usage during inference | Should not freeze or significantly stutter the browser UI. | Qualitative target — quantify during testing. |
-| PF-07 | Network payload per cycle | Minimize. Sanitized schema + compressed redacted image. | Smaller payloads improve latency and reduce bandwidth. |
+| ID | Metric | Proposed Engineering Target | Notes |
+|----|--------|-----------------------------|-------|
+| PF-01 | On-device perception latency (capture + model inference + PII detection + sanitization) | < 2 seconds | Must be fast enough that total loop latency remains practical. |
+| PF-02 | Server VLM reasoning latency (receive sanitized context → return action) | < 3 seconds | Dependent on VLM model size and hosting method. Cloud-hosted API expected to meet this. |
+| PF-03 | Total end-to-end loop latency (one complete cycle) | < 5 seconds | Sum of PF-01 + PF-02 + network + validation + execution overhead. |
+| PF-04 | Extension active memory usage (during inference) | < 500MB | Must remain usable on 8GB RAM machines alongside normal browsing. |
+| PF-05 | Extension idle memory usage | < 100MB | Should not noticeably impact browser performance when not actively running a task. |
+| PF-06 | CPU usage during inference | Browser UI should not freeze or significantly stutter. | Qualitative — quantify during testing. |
+| PF-07 | Network payload per cycle | Minimize. Sanitized screenshot (compressed) + sanitized schema. | Smaller payloads improve latency and reduce bandwidth usage. |
 | PF-08 | MutationObserver debounce interval | ~200ms | Balances responsiveness with resource efficiency. |
+| PF-09 | On-device model cold-start time | < 10 seconds | First-time model loading. Warm inference should meet PF-01. |
 
 ---
 
 ## 16. AI/ML Product Requirements
 
-### 16.1 Visual Understanding
-- The on-device model SHALL identify the visual layout of the page: distinct regions, element boundaries, spatial relationships.
-- The model SHALL distinguish between interactive elements (buttons, links, inputs, dropdowns) and static content (text blocks, images, decorative elements).
+The on-device perception layer is a multi-signal system, not a single model. Different signal sources have different responsibilities. Specific model selection requires benchmarking and is documented separately. Candidate technologies from the finalized team design include ONNX Runtime Web, WebGPU, WASM, MediaPipe, and lightweight ViT/YOLO-class models — final selection is not locked until benchmarking is complete.
 
-### 16.2 UI Element Detection
-- The model SHALL detect and classify common web UI elements: buttons, text inputs, password fields, checkboxes, radio buttons, dropdowns, links, images, and text blocks.
-- Detection SHALL include bounding box coordinates for each identified element.
+### 16.1 Visual Understanding (Lightweight Visual ML)
+- The on-device visual ML model SHALL identify the visual layout of the page: distinct regions, element boundaries, spatial relationships.
+- The model SHALL detect and classify visual UI elements: buttons, input fields, links, images, and text regions, with bounding box coordinates.
+- The model SHALL detect visual content not adequately represented by DOM analysis alone (e.g., canvas-rendered elements, visually complex layouts, cross-origin iframe content visible in the screenshot).
 
-### 16.3 Text and Semantic Understanding
-- The model SHALL be capable of recognizing text rendered in the screenshot (OCR-level capability for PII detection purposes).
-- The model SHOULD understand the semantic role of detected text (e.g., distinguishing a label from a value, a heading from body text).
+### 16.2 DOM / Deterministic Analysis
+- The DOM analysis component SHALL extract HTML element types, input types, labels, positions, interactive state, text content, and structural relationships.
+- Password and OTP fields SHALL be identified deterministically by their HTML `type` attributes, associated labels, and element naming patterns — this is a DOM analysis responsibility, not a visual ML responsibility.
 
-### 16.4 Sensitive Information Detection
-- The model (in combination with heuristic rules) SHALL detect:
-  - Human faces
-  - Password and OTP input fields
-  - Indian identity numbers (Aadhaar: 12-digit pattern, PAN: alphanumeric pattern)
-  - Credit/debit card numbers (13–19 digit patterns with Luhn validation)
+### 16.3 Heuristic PII Detection
+- Deterministic pattern matchers SHALL scan text content extracted from the DOM for:
+  - Aadhaar numbers (12-digit pattern)
+  - PAN numbers (alphanumeric pattern)
+  - Credit/debit card numbers (13–19 digit patterns, with Luhn validation where applicable)
   - Email addresses
   - Phone numbers (Indian and common international formats)
-- Detection recall is critical: missing a sensitive element is worse than a false positive (which merely over-redacts).
+- These heuristics operate on text, not on visual content.
 
-### 16.5 Context Extraction
-- The perception pipeline SHALL produce a structured output (JSON schema) containing: element types, positions, non-sensitive text content, redaction markers, and spatial layout information.
-- This schema SHALL be interpretable by the server-side VLM without access to the raw screenshot.
+### 16.4 Face Detection
+- A dedicated face detection model (e.g., MediaPipe Face Detection) SHALL identify face regions in the screenshot.
+- This is a visual ML responsibility, separate from text-based PII detection.
+
+### 16.5 Local Fusion
+- Signals from DOM analysis, visual ML, and heuristic PII detection SHALL be combined in a local fusion layer to produce a unified sensitivity map.
+- The fusion layer determines which regions/fields require sanitization before transmission.
 
 ### 16.6 Confidence and Uncertainty
-- The model SHOULD provide a confidence score for PII detections.
+- The visual ML model SHOULD provide a confidence score for detections.
 - Regions with low confidence but potential sensitivity SHOULD be redacted by default (fail-safe principle per PV-08).
 
 ### 16.7 Local Inference Constraints
-- The model(s) SHALL run within the browser environment via WebGPU or WASM.
-- Model size SHALL be small enough to load and initialize within a reasonable time (proposed: < 10 seconds cold start, < 2 seconds warm inference).
-- The model format SHALL be compatible with Transformers.js, ONNX Runtime Web, or MediaPipe.
+- All on-device models SHALL run within the browser environment via WebGPU or WASM.
+- Model size SHALL be small enough to load and initialize within a reasonable time (see PF-09).
+- The model format SHALL be compatible with the candidate runtime technologies (Transformers.js, ONNX Runtime Web, MediaPipe).
 
 ---
 
@@ -420,7 +451,7 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 |----|-------------|
 | HL-01 | The user SHALL initiate the agent by stating a goal. The agent SHALL NOT act without a user-provided goal. |
 | HL-02 | The user SHALL be able to cancel the agent at any time, immediately stopping the current action loop. |
-| HL-03 | High-risk actions (as defined by the action safety schema) SHALL pause and present a confirmation dialog to the user before execution. |
+| HL-03 | High-risk actions (as defined by the safety/risk categories in the action validation layer) SHALL pause and present a confirmation dialog to the user before execution. |
 | HL-04 | The user SHOULD be able to view a summary of each action the agent is about to take (transparency). |
 | HL-05 | If the agent encounters an unrecoverable error or exceeds the maximum step count, it SHALL inform the user and stop. |
 | HL-06 | The user SHOULD be able to provide corrective feedback if the agent takes a wrong action (e.g., "go back" or "try the other button"). |
@@ -431,17 +462,18 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 
 | Scenario | Expected Behavior |
 |----------|-------------------|
-| **Poor visual quality** (very small text, unusual fonts, extreme zoom) | The perception model may produce lower-confidence detections. Low-confidence PII detections are still redacted (fail-safe). The VLM is informed of low-confidence regions. |
+| **Poor visual quality** (very small text, unusual fonts, extreme zoom) | The perception layer may produce lower-confidence detections. Low-confidence PII detections are still redacted (fail-safe). The VLM is informed of low-confidence regions. |
 | **Unsupported page type** (PDF viewer, browser-internal pages like `chrome://settings`) | The extension detects that the page is not a standard web page and informs the user that the agent cannot operate on this page. |
 | **Highly dynamic page** (real-time feeds, animations, auto-refreshing content) | The debounced MutationObserver prevents excessive captures. If the page state is unstable, the agent may wait for stability before acting. |
+| **Cross-origin iframes** | Content inside cross-origin iframes is inaccessible to the content script's DOM analysis due to browser same-origin policy. The visual ML model can still perceive these regions from the screenshot. DOM analysis is limited to same-origin content. |
 | **Hidden or overlapping elements** | The visual perception model sees the page as rendered. If an element is visually obscured, it may not be detected. The agent reports failure if it cannot interact with the target element. |
 | **Low-confidence perception** | The sanitization layer errs on the side of redaction. The VLM receives explicit markers indicating low-confidence regions. |
 | **False positive PII detection** (non-sensitive content redacted) | Over-redaction reduces the context available to the VLM but does not compromise privacy. The VLM works with the available context or asks for clarification. |
-| **False negative PII detection** (sensitive content not redacted) | This is the primary risk. Mitigation: combine ML detection with rule-based heuristics and DOM-tag analysis for defense in depth. |
+| **False negative PII detection** (sensitive content not redacted) | This is the primary risk. Mitigation: defense-in-depth through combining visual ML, DOM analysis, and heuristic pattern matching. No system can guarantee 100% detection. |
 | **Network unavailable** | The extension informs the user that it cannot reach the server. On-device perception and redaction still function; only reasoning is unavailable. |
 | **VLM unavailable or returns an error** | The extension informs the user that the AI reasoning service is temporarily unavailable. The agent pauses. |
-| **VLM hallucination** (references a non-existent element) | The content script fails to find the target element, reports the failure, and the VLM receives an updated screen state for re-evaluation. |
-| **Agent attempts an unsafe action** | The action safety validator blocks it. If it matches a high-risk category, the user is asked. If it is out-of-schema, it is rejected silently. |
+| **VLM hallucination** (references a non-existent element) | The content script fails to find the target element, reports the failure with an updated sanitized screen capture, and the VLM receives the updated state for re-evaluation. |
+| **Agent attempts an unsafe action** | The action safety validator blocks it. If it matches a high-risk category, the user is asked. If it is out-of-schema, it is rejected. |
 | **Infinite loop** (agent keeps repeating the same action) | Repeated-state detection triggers after N consecutive identical states. The agent pauses and informs the user. |
 
 ---
@@ -450,38 +482,43 @@ This loop repeats until the task is complete, the user cancels, or the agent det
 
 The Minimum Viable Product is the smallest complete system that demonstrates the core value proposition of PS 26171:
 
-1. A Manifest V3 browser extension that captures the active tab's visual and DOM state.
-2. An on-device vision model that detects at least: faces, password fields, and one category of Indian PII (Aadhaar or PAN patterns).
-3. Local redaction that blurs/masks detected sensitive regions before transmission.
-4. A WebSocket connection that sends only the sanitized representation to a server.
-5. A server-side VLM (local via Ollama or cloud-hosted API) that interprets the sanitized context and returns a structured action command.
-6. Client-side execution of the returned action on the real page.
-7. The loop completes at least 3 consecutive cycles, demonstrating the agent navigating a multi-step task.
+1. A Manifest V3 browser extension that captures the active tab's visual (screenshot) and structural (DOM) state.
+2. An on-device multi-signal perception layer consisting of:
+   - DOM analysis for element structure, input types, labels, and password/OTP field detection.
+   - A lightweight visual ML model for UI element detection, layout understanding, and face detection.
+   - Heuristic pattern matchers for text-based PII (at minimum: Aadhaar, PAN, email, phone numbers, card numbers).
+3. A local fusion and sanitization layer that combines signals from all three sources and produces:
+   - A sanitized screenshot (sensitive visual regions blurred/masked).
+   - A sanitized structured schema (sensitive text replaced with typed placeholders).
+4. A WebSocket connection that transmits only the sanitized screenshot and sanitized schema to the server.
+5. A server-side VLM (local via Ollama or cloud-hosted API of an open-weight model) that interprets the sanitized context and returns a single structured action command.
+6. Client-side two-stage action validation (schema validity + safety/risk check) with user confirmation for high-risk actions.
+7. Client-side execution of the validated action on the real, unredacted page.
+8. The complete loop operating for at least 3 consecutive cycles, demonstrating the agent navigating a multi-step task.
 
 ---
 
 ## 21. SIH Demo Scope
 
-The SIH demonstration should present a compelling, end-to-end workflow that directly addresses all five evaluation criteria:
-
-**Proposed Demo Scenario:** The agent assists the user in completing a multi-step form on a mock web page (e.g., a simulated government service portal or banking application form) that contains pre-filled sensitive information (a profile photo/face, an Aadhaar number, a PAN number, and a phone number).
+The SIH demonstration should present a compelling, end-to-end workflow that directly addresses all five evaluation criteria.
 
 **Demo Flow:**
-1. Show the page with visible PII.
+1. Show a web page containing visible PII (a profile photo/face, an Aadhaar number, a PAN number, a phone number, and a password field).
 2. Activate the agent with a goal (e.g., "Complete this application form").
-3. Show the on-device perception detecting PII (highlight bounding boxes).
-4. Show the redacted/sanitized version that is sent to the server (blurred face, masked numbers).
+3. Show the on-device perception layer detecting PII through multiple signals: face detected by visual ML, password field detected by DOM analysis, Aadhaar/PAN detected by heuristic patterns.
+4. Show the sanitized screenshot (blurred face, masked regions) and sanitized schema (typed placeholders replacing PII text) that are transmitted to the server.
 5. Show the VLM receiving the sanitized context and deciding the next action.
-6. Show the action being executed on the real page.
-7. Show the loop continuing for multiple steps until the form is submitted.
-8. Show the user-confirmation dialog triggering on the final "Submit" action.
+6. Show the two-stage action validation (schema check + safety check).
+7. Show the action being executed on the real, unredacted page.
+8. Show the loop continuing for multiple steps until the task progresses to a submission step.
+9. Show the user-confirmation dialog triggering on the final high-risk "Submit" action.
 
 **What the demo must prove to judges:**
-- Visual context is accurately captured (25%).
-- PII is detected with high recall and precision (20%).
-- Redaction is precise — sensitive data is hidden, non-sensitive data is preserved (20%).
-- The browser remains responsive throughout — no crashes, no excessive CPU/memory (20%).
-- The full loop runs at practical speed (15%).
+- Visual context is accurately captured and understood (SIH metric 1: 25%).
+- PII is detected with high recall and precision across multiple detection methods (SIH metric 2: 20%).
+- Redaction is precise — sensitive data is hidden, non-sensitive context is preserved for VLM reasoning (SIH metric 3: 20%).
+- The browser remains responsive throughout — no crashes, no excessive CPU/memory usage (SIH metric 4: 20%).
+- The full loop runs at practical speed (SIH metric 5: 15%).
 
 ---
 
@@ -489,7 +526,7 @@ The SIH demonstration should present a compelling, end-to-end workflow that dire
 
 | Item | Description |
 |------|-------------|
-| Cryptographic capability tokens | Replace the rule-based action safety check with cryptographically signed, tamper-proof permission tokens. |
+| Cryptographic capability tokens | Replace the rule-based action safety check with cryptographically signed, tamper-proof permission tokens for action validation. |
 | Expanded PII categories | Support for international ID formats, vehicle registration numbers, medical record numbers, biometric data beyond faces. |
 | Full on-device OCR | Deeper text extraction and understanding without any server dependency. |
 | Multi-tab and cross-tab workflows | Agent can coordinate actions across multiple open tabs. |
@@ -505,9 +542,9 @@ The SIH demonstration should present a compelling, end-to-end workflow that dire
 
 | # | Criterion | Measurement |
 |---|-----------|-------------|
-| SC-01 | The agent correctly captures and represents the visual state of test pages. | Evaluated against SIH metric 1 (25%): accuracy of visual context from screen. |
-| SC-02 | The PII detection system achieves high recall (few missed PII instances) and high precision (few false alarms) on test pages containing known PII. | Evaluated against SIH metric 2 (20%): recall and precision for PII detection. |
-| SC-03 | Redacted outputs contain no recoverable PII in the sensitive regions. Non-sensitive context is preserved. | Evaluated against SIH metric 3 (20%): precision of redaction. |
+| SC-01 | The agent correctly captures and represents the visual state of test pages through both screenshot and DOM channels. | Evaluated against SIH metric 1 (25%): accuracy of visual context from screen. |
+| SC-02 | The PII detection system achieves high recall (few missed PII instances) and high precision (few false alarms) across all three detection methods (visual ML, DOM analysis, heuristic patterns) on test pages containing known PII. | Evaluated against SIH metric 2 (20%): recall and precision for PII detection. |
+| SC-03 | Sanitized outputs (screenshot + schema) contain no recoverable PII in the sensitive regions. Non-sensitive context is preserved for VLM reasoning. | Evaluated against SIH metric 3 (20%): precision of redaction. |
 | SC-04 | The extension runs without crashing the browser, without freezing the UI, and within reasonable memory bounds on a standard laptop. | Evaluated against SIH metric 4 (20%): client-side resource utilization. |
 | SC-05 | The end-to-end loop (capture → perceive → sanitize → reason → validate → execute) completes each cycle within a practical timeframe. | Evaluated against SIH metric 5 (15%): overall end-to-end latency. |
 | SC-06 | The agent successfully completes at least one multi-step task during the live demonstration. | Qualitative evaluation by SIH judges. |
@@ -518,11 +555,11 @@ The SIH demonstration should present a compelling, end-to-end workflow that dire
 
 | Approach | Limitation | How AEGIS Differs |
 |----------|-----------|-------------------|
-| **OCR-only systems** | Detect only text-based PII. Miss faces, images, QR codes, and visually-rendered content. Cannot understand page layout. | AEGIS uses a vision model that understands visual layout, element types, and non-textual sensitive content (faces) alongside text detection. |
-| **Screenshot-to-cloud-LLM** | Raw screenshots are sent to a remote server. Privacy is violated by design. | AEGIS ensures raw screenshots never leave the device. The server only receives a sanitized, redacted representation. |
-| **Basic browser extensions** | Operate on DOM text only. Cannot perceive visual layout, canvas content, or iframe content. No AI-driven reasoning. | AEGIS combines DOM analysis with visual perception from an on-device model, enabling understanding of pages that DOM parsing alone cannot handle. |
-| **Generic PII blurring tools** | Apply static, context-unaware redaction. Often over-redact (destroying useful context for downstream tasks) or under-redact. Not integrated with an agent workflow. | AEGIS performs context-aware, selective redaction that preserves as much non-sensitive information as possible for the VLM to reason about, while still protecting PII. |
-| **Cloud-only browser agents** | Require all data to be sent to the cloud. Cannot operate in privacy-restricted environments. | AEGIS splits the pipeline: perception and privacy enforcement are local; only reasoning is remote. This enables use in environments where cloud data exposure is unacceptable. |
+| **OCR-only systems** | Detect only text-based PII. Miss faces, images, QR codes, and visually-rendered content. Cannot understand page layout. | AEGIS combines visual ML (for faces, layout, visual elements) with DOM analysis (for element structure, password fields) and heuristic pattern matching (for text PII). This multi-signal approach covers both visual and textual sensitive content. |
+| **Screenshot-to-cloud-LLM** | Raw screenshots are sent to a remote server. Privacy is violated by design. | AEGIS ensures raw screenshots never leave the device. The server receives only a sanitized screenshot (sensitive regions blurred) and a sanitized schema (PII replaced with typed placeholders). |
+| **Basic browser extensions** | Operate on DOM text only. Cannot perceive visual layout or content rendered outside standard DOM (canvas, cross-origin iframes). No AI-driven reasoning. | AEGIS combines DOM analysis with on-device visual ML, enabling understanding of pages that DOM parsing alone cannot handle. The visual ML perceives the page as rendered, including content invisible to DOM traversal. |
+| **Generic PII blurring tools** | Apply static, context-unaware redaction. Often over-redact (destroying useful context for downstream tasks) or under-redact. Not integrated with an agent workflow. | AEGIS performs context-aware, selective redaction using a multi-signal fusion layer that preserves as much non-sensitive information as possible for the VLM to reason about, while still protecting PII. |
+| **Cloud-only browser agents** | Require all data to be sent to the cloud. Cannot operate in privacy-restricted environments. | AEGIS splits the pipeline: perception and privacy enforcement are local; only reasoning is remote — and even then, only over sanitized data. This enables use in environments where cloud data exposure is unacceptable. |
 
 ---
 
@@ -532,17 +569,18 @@ The SIH demonstration should present a compelling, end-to-end workflow that dire
 - The submission is a working prototype, not a production-ready product.
 - Development timeline is approximately one week.
 - The demo will run on the team's own hardware during the presentation.
-- Cloud-hosted versions of open-weight models are permitted for the VLM during the hackathon.
+- Cloud-hosted versions of open-weight models are permitted for the server-side VLM during the hackathon (per the problem statement).
 
 ### Hardware / Resource Constraints
 - The extension must function on a standard laptop (8GB RAM, integrated GPU or entry-level discrete GPU).
-- WebGPU is the preferred inference backend, but WASM fallback must exist for machines without WebGPU support.
-- The server (if run locally) requires sufficient resources to host the VLM. If insufficient, the cloud API fallback is used.
+- WebGPU is the preferred on-device inference backend, but WASM fallback must exist for machines without WebGPU support.
+- The server (if run locally) requires sufficient resources to host the VLM. If insufficient, the cloud API fallback of the same open-weight model is used.
 
 ### Browser Constraints
-- Target browsers: Chrome 116+ and Edge 116+ (WebGPU support).
+- Target browsers: Chrome 116+ and Edge 116+ (WebGPU support baseline).
 - Manifest V3 is mandatory. MV2-only APIs are not available.
 - `chrome.tabs.captureVisibleTab` captures only the visible viewport, not the full scrollable page.
+- Cross-origin iframes are inaccessible to the content script's DOM analysis due to browser same-origin policy. The visual ML model can still perceive these regions from the screenshot.
 
 ### Network Assumptions
 - A network connection between the browser and the server is required for the reasoning step.
@@ -550,11 +588,11 @@ The SIH demonstration should present a compelling, end-to-end workflow that dire
 - Latency between client and server is assumed to be low for the demo (localhost or LAN).
 
 ### Model Availability Assumptions
-- Pre-trained open-weight models suitable for on-device UI/PII detection exist and can be adapted (e.g., via Transformers.js or ONNX export).
-- Open-weight VLMs (Qwen-VL, PaliGemma, LLaVA) are available for server-side deployment via Ollama or cloud API.
+- Pre-trained open-weight models suitable for on-device visual perception and face detection exist and can be adapted (e.g., via Transformers.js, ONNX Runtime Web, or MediaPipe).
+- Open-weight VLMs (e.g., Qwen-VL, PaliGemma, LLaVA, Gemma) are available for server-side deployment via Ollama or cloud API. Final model selection requires benchmarking.
 
 ### Privacy Constraints
-- The system cannot guarantee 100% PII detection. The design mitigates this through fail-safe over-redaction and defense-in-depth (ML + heuristics + DOM analysis).
+- The system cannot guarantee 100% PII detection. The design mitigates this through fail-safe over-redaction and defense-in-depth (visual ML + heuristic patterns + DOM analysis).
 - The server is assumed to be operated by the same team/organization. Third-party server trust is out of scope for the prototype.
 
 ---
@@ -563,13 +601,12 @@ The SIH demonstration should present a compelling, end-to-end workflow that dire
 
 | # | Question | Impact |
 |---|----------|--------|
-| OQ-01 | **Which specific on-device model(s) should be used for UI element detection and PII detection?** Candidates include small ViT variants, YOLOv8-nano, and MobileNet-based detectors. Selection depends on accuracy-vs-latency trade-offs that need benchmarking. | Affects F2, F3, PF-01, and the 45% of evaluation tied to perception and PII detection. |
-| OQ-02 | **Which server-side VLM will be used for the demo?** Options: Ollama with Qwen-VL locally, or a cloud API (Together AI, Groq, HuggingFace Inference). | Affects PF-02, cost, and demo reliability. |
-| OQ-03 | **What specific demo task should be used for the SIH presentation?** A mock banking form, a government portal, a travel booking page? | Affects how we tune PII detection and what PII categories to prioritize. |
-| OQ-04 | **How should the "high-risk action" categories be defined for the safety validator?** Which actions require user confirmation vs. which proceed automatically? | Affects F7, HL-03, and the user experience of the demo. |
-| OQ-05 | **Should the sanitized context include a redacted image, a text-only schema, or both?** Sending a redacted image provides richer context for the VLM but increases payload size and latency. | Affects PF-07, NFR-05, and VLM reasoning accuracy. |
-| OQ-06 | **What is the maximum number of agent steps before automatic termination?** Too low and the agent cannot complete complex tasks. Too high and a stuck agent wastes resources. | Affects NFR-09 and BA-08. |
-| OQ-07 | **How will the team handle the cold-start latency of loading ML models in the browser?** Options: pre-load on extension install, lazy-load on first use, or progressive loading. | Affects user experience on first activation. |
+| OQ-01 | **Which specific on-device model(s) should be used for visual UI element detection and face detection?** Candidates include small ViT variants, YOLOv8-nano, MobileNet-based detectors, and MediaPipe Face Detection. Selection depends on accuracy-vs-latency trade-offs that need benchmarking. | Affects F2, F4, PF-01, and the 45% of evaluation tied to perception and PII detection. |
+| OQ-02 | **Which server-side VLM will be used for the demo?** Options: Ollama with Qwen-VL or Gemma locally, or a cloud-hosted API of the same open-weight model (Together AI, Groq, HuggingFace Inference). | Affects PF-02, cost, and demo reliability. |
+| OQ-03 | **What specific demo task should be used for the SIH presentation?** A mock banking form, a government portal, or another scenario. | Affects how we tune PII detection and what PII categories to prioritize. |
+| OQ-04 | **How should the "high-risk action" categories be defined for the safety validator?** Which actions require user confirmation vs. which proceed automatically? | Affects F8, HL-03, and the user experience of the demo. |
+| OQ-05 | **What is the maximum number of agent steps before automatic termination?** Too low and the agent cannot complete complex tasks. Too high and a stuck agent wastes resources. | Affects NFR-09 and BA-08. |
+| OQ-06 | **How will the team handle the cold-start latency of loading ML models in the browser?** Options: pre-load on extension install, lazy-load on first use, or progressive loading. | Affects user experience on first activation and PF-09. |
 
 ---
 
@@ -577,9 +614,9 @@ The SIH demonstration should present a compelling, end-to-end workflow that dire
 
 | Problem | Product Goal | Core Feature | Key Requirements | Success Metric |
 |---------|-------------|-------------|-----------------|----------------|
-| Browser agents need visual context to assist users. | G1: Accurately perceive visual state. | F1: Screen Capture, F2: On-Device Visual Perception. | FR-01, FR-02, FR-04, FR-05. | SC-01: Accuracy of visual context (25%). |
-| Visual context contains sensitive PII. | G2: Detect PII with high recall and precision. | F3: Sensitive Information Detection. | FR-06, FR-07, FR-08. | SC-02: PII recall and precision (20%). |
-| PII must not leave the device. | G3: Redact PII before transmission. | F4: Local Redaction/Sanitization, F5: Sanitized Transmission. | FR-09, FR-10, FR-11, PV-01 through PV-08. | SC-03: Redaction precision (20%). |
-| On-device processing must be lightweight. | G4: Maintain acceptable resource usage. | F2: On-Device Perception (lightweight model). | NFR-06, NFR-07, PF-04, PF-05. | SC-04: Client-side resource utilization (20%). |
-| Agent must respond in practical time. | G5: Achieve practical latency. | F10: Perception-Action Loop, F12: WebSocket communication. | NFR-05, PF-01, PF-02, PF-03. | SC-05: End-to-end latency (15%). |
-| Users need actual task completion. | G6: Complete a demo task end-to-end. | F6: VLM Reasoning, F7: Safety Validation, F8: Action Execution. | FR-13 through FR-21. | SC-06: Successful multi-step demo. |
+| Browser agents need visual context to assist users. | G1: Accurately perceive visual state. | F1: Screen Capture, F2: Visual Perception, F3: DOM Analysis. | FR-01, FR-02, FR-04, FR-05. | SC-01: Accuracy of visual context (25%). |
+| Visual context contains sensitive PII that must be detected. | G2: Detect PII with high recall and precision. | F4: Sensitive Information Detection (visual ML + DOM + heuristics). | FR-06, FR-07, FR-08, FR-09. | SC-02: PII recall and precision (20%). |
+| PII must not leave the device in raw form. | G3: Redact PII before transmission. | F5: Local Fusion & Sanitization, F6: Sanitized Transmission. | FR-10, FR-11, FR-12, PV-01 through PV-08. | SC-03: Redaction precision (20%). |
+| On-device processing must be lightweight. | G4: Maintain acceptable resource usage. | F2: Visual Perception (lightweight model), F3: DOM Analysis (no ML overhead). | NFR-06, NFR-07, PF-04, PF-05. | SC-04: Client-side resource utilization (20%). |
+| Agent must respond in practical time. | G5: Achieve practical latency. | F11: Perception-Action Loop, F6: WebSocket communication. | NFR-05, PF-01, PF-02, PF-03. | SC-05: End-to-end latency (15%). |
+| Users need actual task completion. | G6: Complete a demo task end-to-end. | F7: VLM Reasoning, F8: Action Validation, F9: Action Execution. | FR-14 through FR-22. | SC-06: Successful multi-step demo. |
