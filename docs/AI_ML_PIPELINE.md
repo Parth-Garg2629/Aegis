@@ -90,7 +90,7 @@ The pipeline runs entirely on the client device within the browser extension.
   Screenshot: resize/normalize for visual ML input
   DOM Text: normalize/clean for heuristic PII
 
-[3] Signal Generation (four independent, parallel sources)
+[3] Signal Generation (four signal sources, processed concurrently where possible)
       |
   A. DOM / Deterministic Analysis
      Input: Raw DOM Tree
@@ -150,7 +150,7 @@ If any signal source fails, it returns an empty signal array. The pipeline conti
 
 ### 4.1 Purpose
 
-DOM analysis is the highest-confidence signal source. It extracts structural, semantic, and interactive information from the page that the browser's DOM API exposes reliably. It identifies password and OTP fields with certainty, which no visual model can match.
+DOM analysis is the highest-confidence signal source. It extracts structural, semantic, and interactive information from the page that the browser's DOM API exposes reliably. DOM analysis deterministically identifies explicitly typed sensitive fields such as password, email, and telephone inputs, while OTP detection may rely on heuristic field metadata.
 
 ### 4.2 Input
 
@@ -182,7 +182,7 @@ DOM analysis uses the following deterministic rules:
 | Detection Target | Rule | Confidence |
 |-----------------|------|-----------|
 | **Password field** | `element.type === "password"` | 1.0 — FINAL |
-| **OTP field** | `element.type === "number"` AND (name/id/placeholder/label contains "otp", "verification", "code", "pin" — case-insensitive) | 1.0 for clear matches |
+| **OTP field** | `element.type === "number"` AND (name/id/placeholder/label contains "otp", "verification", "code", "pin" — case-insensitive) | 0.9 (PROPOSED) — label matching is heuristic |
 | **Email field** | `element.type === "email"` | 1.0 — FINAL |
 | **Phone field** | `element.type === "tel"` | 1.0 — FINAL |
 | **Sensitive text area** | Textarea with label containing "aadhaar", "pan", "card number", "passport", "account number" (case-insensitive) | 0.9 (PROPOSED — label matching is heuristic) |
@@ -370,9 +370,7 @@ The following thresholds are **proposed** and must be validated during benchmark
 - Compute mAP@0.5 per class.
 - Compute false positive and false negative rates.
 
-**Step 5 — Comparative analysis:** Rank candidates by weighted score. Select the model that meets all minimum thresholds and best balances accuracy vs. latency vs. size.
-
-**Step 6 — Decision record:** Document the selection decision and benchmark results in an ADR (Architecture Decision Record) appended to this document.
+**Step 5 — Comparative analysis:** Apply the defined minimum acceptance thresholds to each candidate, then compare the resulting accuracy, latency, size, memory, compatibility, and deployment trade-offs. Document the final selection and benchmark results in an ADR.
 
 ### 6.5 Decision Status
 
@@ -392,7 +390,7 @@ ONNX Runtime Web (ORT-Web) is the **proposed** primary inference runtime for the
 
 | Backend | Trigger Condition | Relative Performance |
 |---------|------------------|---------------------|
-| **WebGPU** | `navigator.gpu` is available AND GPU adapter is accessible | Fastest (10–50x vs WASM for compute-heavy models) |
+| **WebGPU** | `navigator.gpu` is available AND GPU adapter is accessible | Faster for supported workloads; performance must be benchmarked on target hardware. |
 | **WASM (multithreaded)** | WebGPU unavailable; browser supports `SharedArrayBuffer` | Moderate |
 | **WASM (single-threaded)** | WebGPU unavailable; `SharedArrayBuffer` not available | Slowest — fallback of last resort |
 
@@ -431,7 +429,7 @@ Step 5: Signal model-ready to the Loop Controller
 | **Lazy-load on first activation** | First activation is slow (download) | Small install | No memory until used |
 | **Bundle with extension** | Fast activation | Larger extension package | Loaded on activation |
 
-**Recommended approach (proposed):** Bundle the model with the extension to avoid network dependencies during inference. Final decision depends on model file size.
+**Recommended approach (proposed):** For the MVP, model weights should be bundled with the extension and loaded locally. Remote/CDN loading may be considered as a future deployment option, but it must never transmit screenshots, DOM content, PII, or agent context. Final decision depends on model file size.
 
 ### 7.5 Inference Lifecycle
 
@@ -465,7 +463,7 @@ Per-cycle inference:
 MV3 service workers may be suspended by Chrome when inactive. Consequences:
 - The loaded model (in-memory) is lost on suspension.
 - On re-activation, the model must be re-loaded.
-- **Mitigation:** Use `chrome.alarms` keepalive or an active WebSocket connection (which tends to prevent worker suspension during an agent session). The exact keepalive strategy is **TBD** (referenced in TECHNICAL_SPEC.md Section 12.1).
+- **Mitigation:** Use an appropriate MV3-compatible lifecycle strategy. An active WebSocket connection must not be treated as a guaranteed service-worker keepalive. The exact keepalive/offscreen strategy is TBD (refer to TECHNICAL_SPEC.md Section 12.1).
 
 ### 7.9 Browser Compatibility
 
@@ -538,11 +536,8 @@ h_px = relativeBox.height * screenshot.height
 
 ### 8.6 Local-Only Execution
 
-MediaPipe runs entirely within the browser. No network calls are made. The MediaPipe WASM binary and model weights are either:
-- Loaded from the extension's bundled assets (preferred — avoids CDN dependency).
-- Loaded from a CDN on first use.
-
-> **Proposed:** Bundle MediaPipe assets with the extension for consistent offline-capable performance.
+MediaPipe runs entirely within the browser. No network calls are made. The MediaPipe WASM binary and model weights must follow the same loading strategy as the Visual ML model.
+For the MVP, model weights should be bundled with the extension and loaded locally. Remote/CDN loading may be considered as a future deployment option, but it must never transmit screenshots, DOM content, PII, or agent context.
 
 ### 8.7 Failure and Degraded Behavior
 
@@ -555,7 +550,7 @@ MediaPipe runs entirely within the browser. No network calls are made. The Media
 **Risk of MediaPipe failure:** Face regions may not be detected in that cycle. Mitigated by:
 - This is one of four signal sources. Other signals continue.
 - Visual ML may detect face-like regions independently if its class vocabulary includes them.
-- The fail-safe redaction principle means even partial signals trigger redaction.
+- The fail-safe principle applies to detected low-confidence sensitive regions; it does not guarantee detection when a signal source completely fails.
 
 ---
 
@@ -673,6 +668,8 @@ PIISignal:
   confidence:    number (0.0-1.0)
   checksumValid: boolean | null   // null if no checksum available
 ```
+
+For MVP, `matchedRegion` identifies the detected substring, while sanitization uses the associated DOM element's bounding box and `elementId`; substring-level replacement is not required.
 
 ### 9.6 Confidence and Decision Policy
 
@@ -1076,7 +1073,7 @@ All targets are **proposed engineering targets** from PRD Section 15 and TECHNIC
 |-----------|----------------|--------|
 | Visual ML model weights | < 30–50MB | PROPOSED — depends on model |
 | Visual ML inference buffers (per cycle) | < 20MB | PROPOSED |
-| MediaPipe model | < 20MB | Known — MediaPipe Face Detection model |
+| MediaPipe model | < 20MB | PROPOSED — validate for selected model/runtime |
 | DOM extraction data (per cycle) | < 5MB | PROPOSED |
 | Raw screenshot (in-memory) | ~2–10MB at 1080p | Depends on resolution |
 | Sanitized screenshot copy | ~2–10MB | Same as raw |
@@ -1087,7 +1084,7 @@ All targets are **proposed engineering targets** from PRD Section 15 and TECHNIC
 
 | Optimization | Expected Gain | Status |
 |-------------|--------------|--------|
-| Quantize visual ML model (INT8 or FP16) | ~2–4x size reduction; faster inference | PROPOSED — validate accuracy impact |
+| Quantize visual ML model (INT8 or FP16) | Potential size and inference benefits; quantify during benchmarking | PROPOSED — validate accuracy impact |
 | Downscale screenshot before inference | Reduce preprocessing time and input tensor size | PROPOSED |
 | Skip visual ML if DOM-only sufficient (simple pages) | Reduce per-cycle latency | PROPOSED — requires page complexity heuristic |
 | Cache DOM extraction if page unchanged between cycles | Avoid redundant traversal | PROPOSED |
@@ -1140,7 +1137,7 @@ perception_status: {
 
 > **INVARIANT — FINAL:** Under all failure conditions, the sanitization pipeline remains fail-closed.
 >
-> If the perception pipeline fails and cannot produce a `SensitivityMap`, the context MUST NOT be transmitted to the server. The system errs on the side of not transmitting rather than risking PII leakage.
+> Degraded perception may continue only when a valid SensitivityMap can be produced and sanitization succeeds. If the system cannot establish a valid sanitized representation, transmission is blocked and the system fails closed. The system errs on the side of not transmitting rather than risking PII leakage.
 >
 > If the sanitization pipeline itself fails (e.g., Canvas API error), the context is not transmitted (per TECHNICAL_SPEC.md Section 10.5).
 
