@@ -1,0 +1,117 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ContextUpdateMessage",
+  "type": "object",
+  "required": ["type", "session_id", "timestamp", "protocol_version", "payload"],
+  "properties": {
+    "type": { "const": "context_update" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string" },
+    "protocol_version": { "const": "1.0" },
+    "payload": {
+      "type": "object",
+      "required": [
+        "step_number",
+        "agent_state",
+        "sanitized_screenshot",
+        "screenshot_format",
+        "sanitized_schema",
+        "previous_action_result"
+      ],
+      "properties": {
+        "step_number": { "type": "integer", "minimum": 1 },
+        "agent_state": { "type": "string", "enum": ["running", "paused", "confirming"] },
+        "sanitized_screenshot": { "type": "string" },
+        "screenshot_format": { "type": "string", "enum": ["webp", "jpeg"] },
+        "sanitized_schema": {
+          "type": "object",
+          "required": ["url", "title", "elements"],
+          "properties": {
+            "url": { "type": "string" },
+            "title": { "type": "string" },
+            "elements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "tagName",
+                  "boundingBox",
+                  "isVisible",
+                  "isDisabled",
+                  "isReadOnly",
+                  "isInteractive"
+                ],
+                "properties": {
+                  "id": { "type": "string" },
+                  "tagName": { "type": "string" },
+                  "type": { "type": ["string", "null"] },
+                  "role": { "type": ["string", "null"] },
+                  "label": { "type": ["string", "null"] },
+                  "text": { "type": ["string", "null"] },
+                  "value": { "type": ["string", "null"] },
+                  "boundingBox": {
+                    "type": "object",
+                    "required": ["x", "y", "width", "height"],
+                    "properties": {
+                      "x": { "type": "number" },
+                      "y": { "type": "number" },
+                      "width": { "type": "number" },
+                      "height": { "type": "number" }
+                    },
+                    "additionalProperties": false
+                  },
+                  "isVisible": { "type": "boolean" },
+                  "isDisabled": { "type": "boolean" },
+                  "isReadOnly": { "type": "boolean" },
+                  "isInteractive": { "type": "boolean" },
+                  "parentFormId": { "type": ["string", "null"] },
+                  "attributes": {
+                    "type": "object",
+                    "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "forms": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "elementIds"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "action": { "type": ["string", "null"] },
+                  "method": { "type": ["string", "null"], "enum": ["GET", "POST", "get", "post", null] },
+                  "elementIds": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "previous_action_result": {
+          "type": ["object", "null"],
+          "properties": {
+            "action_type": { "type": "string" },
+            "target_element_id": { "type": ["string", "null"] },
+            "success": { "type": "boolean" },
+            "error_code": { "type": ["string", "null"] },
+            "error_message": { "type": ["string", "null"] },
+            "local_input_status": {
+              "type": ["string", "null"],
+              "enum": ["LOCAL_INPUT_PROVIDED", "LOCAL_INPUT_CANCELLED", null]
+            }
+          },
+          "required": ["action_type", "success"]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

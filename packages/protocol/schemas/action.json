@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ActionMessage",
+  "type": "object",
+  "required": ["type", "session_id", "timestamp", "protocol_version", "payload"],
+  "properties": {
+    "type": { "const": "action" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string" },
+    "protocol_version": { "const": "1.0" },
+    "payload": {
+      "type": "object",
+      "required": ["step_number", "action"],
+      "properties": {
+        "step_number": { "type": "integer", "minimum": 1 },
+        "action": {
+          "type": "object",
+          "required": ["action_type"],
+          "properties": {
+            "action_type": {
+              "type": "string",
+              "enum": ["click", "type", "scroll", "select", "hover", "wait", "done", "fail"]
+            },
+            "target": { "type": ["string", "null"] },
+            "value": { "type": ["string", "null"], "maxLength": 500 },
+            "reasoning": { "type": ["string", "null"], "maxLength": 1000 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

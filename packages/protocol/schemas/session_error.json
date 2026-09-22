@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionErrorMessage",
+  "type": "object",
+  "required": ["type", "session_id", "timestamp", "protocol_version", "payload"],
+  "properties": {
+    "type": { "const": "session_error" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string" },
+    "protocol_version": { "const": "1.0" },
+    "payload": {
+      "type": "object",
+      "required": ["error_code", "error_message", "recoverable"],
+      "properties": {
+        "error_code": { "type": "string" },
+        "error_message": { "type": "string" },
+        "recoverable": { "type": "boolean" },
+        "suggested_action": {
+          "type": ["string", "null"],
+          "enum": ["retry", "reconnect", "terminate", null]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

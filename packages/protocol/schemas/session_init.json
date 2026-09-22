@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionInitMessage",
+  "type": "object",
+  "required": ["type", "timestamp", "protocol_version", "payload"],
+  "properties": {
+    "type": { "const": "session_init" },
+    "session_id": { "type": "null" },
+    "timestamp": { "type": "string" },
+    "protocol_version": { "const": "1.0" },
+    "payload": {
+      "type": "object",
+      "required": ["goal", "client_metadata"],
+      "properties": {
+        "goal": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "client_metadata": {
+          "type": "object",
+          "required": ["extension_version", "browser", "browser_version", "max_steps"],
+          "properties": {
+            "extension_version": { "type": "string" },
+            "browser": { "type": "string", "enum": ["chrome", "edge"] },
+            "browser_version": { "type": "string" },
+            "max_steps": { "type": "integer", "minimum": 1, "maximum": 100 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

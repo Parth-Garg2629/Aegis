@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "SessionResumeMessage",
+  "type": "object",
+  "required": ["type", "session_id", "timestamp", "protocol_version", "payload"],
+  "properties": {
+    "type": { "const": "session_resume" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string" },
+    "protocol_version": { "const": "1.0" },
+    "payload": {
+      "type": "object",
+      "required": ["last_known_step"],
+      "properties": {
+        "last_known_step": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

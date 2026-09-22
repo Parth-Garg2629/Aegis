@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false
+  },
+  "files": [],
+  "references": [
+    { "path": "./packages/protocol" },
+    { "path": "./packages/shared" },
+    { "path": "./extension" }
+  ]
+}

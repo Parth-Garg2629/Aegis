@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MessageEnvelope",
+  "type": "object",
+  "required": ["type", "timestamp", "protocol_version", "payload"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "session_init",
+        "context_update",
+        "session_resume",
+        "session_end",
+        "action_denied",
+        "action_result",
+        "ping",
+        "session_created",
+        "action",
+        "session_error",
+        "session_resumed",
+        "pong"
+      ]
+    },
+    "session_id": {
+      "type": ["string", "null"]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "protocol_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

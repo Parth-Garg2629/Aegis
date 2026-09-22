@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ActionDeniedMessage",
+  "type": "object",
+  "required": ["type", "session_id", "timestamp", "protocol_version", "payload"],
+  "properties": {
+    "type": { "const": "action_denied" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string" },
+    "protocol_version": { "const": "1.0" },
+    "payload": {
+      "type": "object",
+      "required": ["step_number", "denied_action_type", "risk_category", "denial_source"],
+      "properties": {
+        "step_number": { "type": "integer", "minimum": 1 },
+        "denied_action_type": { "type": "string" },
+        "risk_category": { "type": "string" },
+        "denial_source": { "type": "string", "enum": ["user", "risk_engine_blocked"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

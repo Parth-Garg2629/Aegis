@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ActionResultMessage",
+  "type": "object",
+  "required": ["type", "session_id", "timestamp", "protocol_version", "payload"],
+  "properties": {
+    "type": { "const": "action_result" },
+    "session_id": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string" },
+    "protocol_version": { "const": "1.0" },
+    "payload": {
+      "type": "object",
+      "required": ["step_number", "action_type", "success"],
+      "properties": {
+        "step_number": { "type": "integer", "minimum": 1 },
+        "action_type": { "type": "string" },
+        "success": { "type": "boolean" },
+        "error_code": { "type": ["string", "null"] },
+        "error_message": { "type": ["string", "null"] },
+        "local_input_status": {
+          "type": ["string", "null"],
+          "enum": ["LOCAL_INPUT_PROVIDED", "LOCAL_INPUT_CANCELLED", null]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

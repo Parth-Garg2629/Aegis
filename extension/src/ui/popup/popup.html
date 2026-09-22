@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AEGIS Agent</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --danger: #ef4444;
+      --border: #334155;
+    }
+    body {
+      margin: 0;
+      padding: 16px;
+      width: 360px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0 0 12px 0;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 8px;
+      font-family: inherit;
+      resize: vertical;
+      min-height: 60px;
+    }
+    textarea:focus {
+      outline: 1px solid var(--accent);
+    }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    button {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #0f172a;
+    }
+    .btn-cancel {
+      background: var(--danger);
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <h1>AEGIS Agent</h1>
+  <div class="card">
+    <label for="goal-input" style="display:block; margin-bottom: 6px; font-weight: 500;">Task Goal</label>
+    <textarea id="goal-input" placeholder="e.g. Complete my scholarship application..."></textarea>
+    <div class="btn-row">
+      <button id="start-btn" class="btn-primary">Start Agent</button>
+      <button id="cancel-btn" class="btn-cancel" disabled>Cancel</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="status-row">
+      <span>Status: <strong id="agent-status">Idle</strong></span>
+      <span id="step-counter">Step 0 / 30</span>
+    </div>
+  </div>
+  <script type="module" src="./popup.ts"></script>
+</body>
+</html>
