@@ -39,3 +39,4 @@ Thumbs.db
 
 # Evaluation & test runs
 eval/runs/*/artifacts/
+test-results/

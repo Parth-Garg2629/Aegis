@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FP-01: Scholarship Search Fixture</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 40px auto;
+      max-width: 600px;
+      padding: 20px;
+      line-height: 1.5;
+      color: #333;
+    }
+    h1 {
+      font-size: 24px;
+      color: #1a365d;
+      margin-bottom: 20px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+    input[type="text"]:focus {
+      outline: 2px solid #3b82f6;
+      border-color: #3b82f6;
+    }
+    button {
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #1d4ed8;
+    }
+    #results-container {
+      margin-top: 24px;
+      padding: 16px;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      background-color: #f8fafc;
+      min-height: 50px;
+    }
+    .result-item {
+      padding: 8px 12px;
+      background: white;
+      border-radius: 4px;
+      border: 1px solid #e2e8f0;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>FP-01: National Scholarship Search</h1>
+  <form id="search-form" onsubmit="return false;">
+    <div class="form-group">
+      <label for="search-input">Search Query</label>
+      <input type="text" id="search-input" name="query" placeholder="Enter scholarship topic or keyword...">
+    </div>
+    <button type="button" id="submit-button">Search Scholarships</button>
+  </form>
+
+  <div id="results-container">
+    <div id="status-message">Ready to search.</div>
+  </div>
+
+  <script>
+    const searchInput = document.getElementById('search-input');
+    const submitBtn = document.getElementById('submit-button');
+    const statusMsg = document.getElementById('status-message');
+    const resultsContainer = document.getElementById('results-container');
+
+    function performSearch() {
+      const query = searchInput.value.trim();
+      if (!query) {
+        statusMsg.textContent = 'Please enter a search query.';
+        return;
+      }
+
+      statusMsg.innerHTML = 'Showing results for: <strong id="query-echo">' + query + '</strong>';
+      resultsContainer.setAttribute('data-status', 'searched');
+
+      const card = document.createElement('div');
+      card.className = 'result-item';
+      card.id = 'result-card-1';
+      card.textContent = 'Merit-based Scholarship 2026 for ' + query;
+      resultsContainer.appendChild(card);
+    }
+
+    submitBtn.addEventListener('click', performSearch);
+    searchInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        performSearch();
+      }
+    });
+  </script>
+</body>
+</html>

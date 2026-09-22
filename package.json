@@ -7,11 +7,13 @@
     "build": "pnpm -r run build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "typecheck": "tsc -b",
     "lint": "eslint . --ext .ts,.js",
     "verify": "node scripts/verify.mjs"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/node": "^22.10.1",
     "eslint": "^9.16.0",
     "prettier": "^3.4.2",

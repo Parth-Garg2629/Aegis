@@ -99,4 +99,9 @@ runStep('Bundle Safety & Remote URL Scan', () => {
   }
 });
 
+// Step 7: Playwright E2E Walking Skeleton (2 Complete Cycles)
+runStep('Playwright E2E Walking Skeleton (Two Complete Cycles)', () => {
+  execSync('npx playwright test', { cwd: rootDir, stdio: 'inherit' });
+});
+
 console.log('\n[AEGIS VERIFY] ALL QUALITY GATES PASSED! System is ready.\n');
