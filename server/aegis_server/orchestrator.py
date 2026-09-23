@@ -1,9 +1,3 @@
-"""
-AEGIS Agent Orchestrator
-Coordinates incoming sanitized context updates with VLM providers,
-enforcing step tracking and action validation.
-"""
-
 from typing import Tuple
 from aegis_server.protocol import ActionObject, ContextUpdatePayload
 from aegis_server.providers.mock import MockVLMProvider, mock_vlm_provider
@@ -23,10 +17,8 @@ class AgentOrchestrator:
             step_number=context.step_number,
         )
 
-        # Generate schema-valid action via provider
         action = self.provider.generate_action(context, goal=session.goal)
 
-        # Record step in session history
         session.record_step(context, action)
 
         slog.info(

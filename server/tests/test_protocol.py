@@ -1,8 +1,3 @@
-"""
-Contract tests for AEGIS Server Protocol Models
-Source of Truth: docs/API_SPEC.md §18
-"""
-
 import pytest
 from pydantic import ValidationError
 from aegis_server.protocol import (
@@ -16,7 +11,6 @@ from aegis_server.protocol import (
 
 
 def test_golden_context_update_contract():
-    # Verbatim golden message from API_SPEC §18 Step 5
     raw = {
         "type": "context_update",
         "session_id": "sess-abc123",
@@ -111,7 +105,6 @@ def test_golden_context_update_contract():
 
 
 def test_golden_action_contract():
-    # Verbatim golden message from API_SPEC §18 Step 5
     raw = {
         "type": "action",
         "session_id": "sess-abc123",
@@ -135,7 +128,6 @@ def test_golden_action_contract():
 
 
 def test_golden_action_result_contract():
-    # Verbatim golden message from API_SPEC §18 Step 5
     raw = {
         "type": "action_result",
         "session_id": "sess-abc123",
@@ -161,4 +153,4 @@ def test_action_object_vocabulary_restriction():
     assert valid.action_type == "click"
 
     with pytest.raises(ValidationError):
-        ActionObject(action_type="execute_script")  # arbitrary execution not allowed
+        ActionObject(action_type="execute_script")

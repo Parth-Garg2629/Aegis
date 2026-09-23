@@ -1,8 +1,3 @@
-/**
- * AEGIS MV3 Manifest Definition
- * Source of Truth: docs/TECHNICAL_SPEC.md §3, docs/IMPLEMENTATION_PLAN.md SD-07
- */
-
 export const APPROVED_PERMISSIONS = [
   'activeTab',
   'storage',

@@ -1,8 +1,3 @@
-"""
-Integration tests for FastAPI WebSocket gateway
-Verifies full bi-directional communication, protocol schemas, and multi-cycle execution.
-"""
-
 import json
 from fastapi.testclient import TestClient
 from aegis_server.main import app
@@ -21,7 +16,6 @@ def test_websocket_walking_skeleton_cycles():
     client = TestClient(app)
 
     with client.websocket_connect("/ws") as ws:
-        # 1. session_init
         init_payload = {
             "type": "session_init",
             "session_id": None,
@@ -46,7 +40,6 @@ def test_websocket_walking_skeleton_cycles():
         assert session_id is not None
         assert created_data["payload"]["server_max_steps"] == 30
 
-        # 2. Cycle 1: context_update (Step 1)
         ctx1 = {
             "type": "context_update",
             "session_id": session_id,
@@ -84,7 +77,6 @@ def test_websocket_walking_skeleton_cycles():
         assert action1_data["payload"]["step_number"] == 1
         assert action1_data["payload"]["action"]["action_type"] == "type"
 
-        # Report action_result for Step 1
         res1 = {
             "type": "action_result",
             "session_id": session_id,
@@ -98,7 +90,6 @@ def test_websocket_walking_skeleton_cycles():
         }
         ws.send_text(json.dumps(res1))
 
-        # 3. Cycle 2: fresh context_update (Step 2)
         ctx2 = {
             "type": "context_update",
             "session_id": session_id,
@@ -140,7 +131,6 @@ def test_websocket_walking_skeleton_cycles():
         assert action2_data["payload"]["step_number"] == 2
         assert action2_data["payload"]["action"]["action_type"] == "click"
 
-        # Report action_result for Step 2
         res2 = {
             "type": "action_result",
             "session_id": session_id,
@@ -154,7 +144,6 @@ def test_websocket_walking_skeleton_cycles():
         }
         ws.send_text(json.dumps(res2))
 
-        # 4. Cycle 3: context_update (Step 3 -> Should be done)
         ctx3 = {
             "type": "context_update",
             "session_id": session_id,
@@ -185,7 +174,6 @@ def test_websocket_walking_skeleton_cycles():
         assert action3_data["payload"]["step_number"] == 3
         assert action3_data["payload"]["action"]["action_type"] == "done"
 
-        # 5. session_end
         end_msg = {
             "type": "session_end",
             "session_id": session_id,

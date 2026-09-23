@@ -1,10 +1,3 @@
-/**
- * AEGIS DOM Extractor (Work Package B2)
- * Source of Truth: docs/TECHNICAL_SPEC.md §7.2, §7.3, docs/IMPLEMENTATION_PLAN.md B2
- * Extracts interactive elements, computes bounding boxes, resolves accessible labels,
- * and maintains the compile-time privacy boundary at extraction time.
- */
-
 import type { BoundingBox, SanitizedElement, SanitizedForm, SanitizedSchema } from '@aegis/protocol';
 import { slog } from '@aegis/shared';
 import { idRegistry } from './id-registry';
@@ -35,11 +28,9 @@ function isElementVisible(el: Element, rect: DOMRect): boolean {
 }
 
 function resolveLabel(el: Element): string | null {
-  // 1. aria-label
   const ariaLabel = el.getAttribute('aria-label');
   if (ariaLabel && ariaLabel.trim()) return ariaLabel.trim();
 
-  // 2. aria-labelledby
   const ariaLabelledBy = el.getAttribute('aria-labelledby');
   if (ariaLabelledBy) {
     const labelEl = document.getElementById(ariaLabelledBy);
@@ -48,7 +39,6 @@ function resolveLabel(el: Element): string | null {
     }
   }
 
-  // 3. Associated <label for="id">
   if (el.id) {
     const labelFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
     if (labelFor && labelFor.textContent?.trim()) {
@@ -56,21 +46,17 @@ function resolveLabel(el: Element): string | null {
     }
   }
 
-  // 4. Enclosing <label>
   const parentLabel = el.closest('label');
   if (parentLabel && parentLabel.textContent?.trim()) {
     return parentLabel.textContent.trim();
   }
 
-  // 5. Placeholder
   const placeholder = el.getAttribute('placeholder');
   if (placeholder && placeholder.trim()) return placeholder.trim();
 
-  // 6. Title
   const title = el.getAttribute('title');
   if (title && title.trim()) return title.trim();
 
-  // 7. Text content for buttons/links
   if (el instanceof HTMLButtonElement || el instanceof HTMLAnchorElement || el.getAttribute('role') === 'button') {
     const text = el.textContent?.trim();
     if (text) return text.slice(0, 100);
@@ -131,7 +117,6 @@ export function extractDom(): SanitizedSchema {
     let value: string | null = null;
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
       if (isSensitiveField(el)) {
-        // Privacy boundary: raw sensitive values must never be extracted or sent to the server
         value = '[REDACTED_PASSWORD]';
       } else {
         value = el.value ? el.value.slice(0, 200) : null;
@@ -175,7 +160,6 @@ export function extractDom(): SanitizedSchema {
     elementIds: info.elementIds,
   }));
 
-  // SD-05: Schema URL must be origin + pathname only (strip query params / fragments)
   const cleanUrl = `${window.location.origin}${window.location.pathname}`;
 
   return {
@@ -186,7 +170,6 @@ export function extractDom(): SanitizedSchema {
   };
 }
 
-// Internal listener for Service Worker extraction requests
 if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message: ExtractDomRequestMessage, _sender, sendResponse) => {
     if (message.type === 'EXTRACT_DOM_REQUEST') {

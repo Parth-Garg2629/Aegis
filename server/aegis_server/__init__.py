@@ -1,1 +1,0 @@
-# AEGIS Server Package

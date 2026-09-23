@@ -1,7 +1,3 @@
-"""
-Tests for AEGIS Server Safe Structured Logging (slog)
-"""
-
 from aegis_server.slog import slog, set_log_sink, filter_safe_fields
 
 
@@ -14,7 +10,6 @@ def test_python_slog_filters_unwhitelisted_fields():
         "step_number": 3,
         "action_type": "type",
         "duration_ms": 120,
-        # Dangerous fields:
         "raw_user_secret": "mySecretPassword123",
         "sql_query": "SELECT * FROM users",
     }

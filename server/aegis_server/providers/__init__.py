@@ -1,3 +1,0 @@
-"""
-AEGIS Providers Package
-"""

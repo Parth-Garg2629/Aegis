@@ -1,7 +1,3 @@
-"""
-Unit tests for Mock VLM Provider
-"""
-
 from aegis_server.protocol import (
     BoundingBox,
     ContextUpdatePayload,
@@ -56,20 +52,17 @@ def create_test_context(step: int) -> ContextUpdatePayload:
 def test_mock_provider_deterministic_cycles():
     provider = MockVLMProvider()
 
-    # Step 1: Should type into search input
     ctx1 = create_test_context(1)
     act1 = provider.generate_action(ctx1, goal="Find STEM scholarship")
     assert act1.action_type == "type"
     assert act1.target == "el-search-input"
     assert act1.value is not None
 
-    # Step 2: Should click submit button
     ctx2 = create_test_context(2)
     act2 = provider.generate_action(ctx2, goal="Find STEM scholarship")
     assert act2.action_type == "click"
     assert act2.target == "el-submit-button"
 
-    # Step 3: Should emit done
     ctx3 = create_test_context(3)
     act3 = provider.generate_action(ctx3, goal="Find STEM scholarship")
     assert act3.action_type == "done"

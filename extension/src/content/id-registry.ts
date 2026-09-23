@@ -1,27 +1,13 @@
-/**
- * AEGIS Stable ID Registry (Work Package B2)
- * Provides deterministic, stable element identifiers using WeakMap and reverse Map
- * without mutating the DOM or attaching invasive custom attributes.
- */
-
 export class StableIdRegistry {
   private elementToId = new WeakMap<Element, string>();
   private idToElement = new Map<string, Element>();
   private counter = 0;
 
-  /**
-   * Resets the reverse lookup registry (e.g., between page navigations).
-   */
   public reset(): void {
     this.idToElement.clear();
     this.counter = 0;
   }
 
-  /**
-   * Returns an existing stable ID or generates a new one for the element.
-   * If the element has a native id (e.g., "search-input"), assigns "el-search-input".
-   * Otherwise assigns "el-{counter}".
-   */
   public getOrCreateId(element: Element): string {
     const existing = this.elementToId.get(element);
     if (existing) {
@@ -45,9 +31,6 @@ export class StableIdRegistry {
     return candidateId;
   }
 
-  /**
-   * Looks up an element by its stable ID.
-   */
   public getElementById(id: string): Element | null {
     const el = this.idToElement.get(id);
     if (el && el.isConnected) {

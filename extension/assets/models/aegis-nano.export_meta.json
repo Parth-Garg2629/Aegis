@@ -1,0 +1,29 @@
+{
+  "input_shape": [
+    1,
+    3,
+    320,
+    320
+  ],
+  "output_shape": [
+    1,
+    20,
+    20,
+    14
+  ],
+  "class_names": [
+    "button",
+    "input_field",
+    "text_region",
+    "link",
+    "image",
+    "icon",
+    "dropdown",
+    "checkbox",
+    "radio"
+  ],
+  "grid_size": 20,
+  "max_diff_torch_vs_ort": 3.0517578125e-05,
+  "model_size_mb": 0.6256179809570312,
+  "opset_version": 17
+}

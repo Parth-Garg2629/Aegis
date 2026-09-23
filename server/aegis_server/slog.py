@@ -1,8 +1,3 @@
-"""
-Safe Structured Logging for AEGIS Server (ADR-12, SECURITY_PRIVACY.md §20, PI-06)
-Accepts strictly whitelisted fields only to prevent accidental PII leakage.
-"""
-
 from datetime import datetime, timezone
 import json
 import sys

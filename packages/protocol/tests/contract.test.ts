@@ -17,7 +17,6 @@ import {
 } from '../src/index.js';
 
 describe('Protocol Golden Message Contracts (API_SPEC §18)', () => {
-  // Step 5 - Client sends context (verbatim API_SPEC §18)
   const goldenContextUpdate: ContextUpdateMessage = {
     type: 'context_update',
     session_id: 'sess-abc123',
@@ -101,7 +100,6 @@ describe('Protocol Golden Message Contracts (API_SPEC §18)', () => {
     },
   };
 
-  // Step 5 - Server responds with action (verbatim API_SPEC §18)
   const goldenAction: ActionMessage = {
     type: 'action',
     session_id: 'sess-abc123',
@@ -119,7 +117,6 @@ describe('Protocol Golden Message Contracts (API_SPEC §18)', () => {
     },
   };
 
-  // Step 5 - Client executes and reports result (verbatim API_SPEC §18)
   const goldenActionResult: ActionResultMessage = {
     type: 'action_result',
     session_id: 'sess-abc123',
@@ -270,7 +267,6 @@ describe('Protocol Golden Message Contracts (API_SPEC §18)', () => {
   });
 
   it('enforces closed action vocabulary and constraints in validateActionObject', () => {
-    // Valid actions
     expect(validateActionObject({ action_type: 'click', target: 'el-1' })).toBe(true);
     expect(validateActionObject({ action_type: 'type', target: 'el-1', value: 'hello' })).toBe(true);
     expect(validateActionObject({ action_type: 'scroll', value: 'down' })).toBe(true);
@@ -281,10 +277,9 @@ describe('Protocol Golden Message Contracts (API_SPEC §18)', () => {
     expect(validateActionObject({ action_type: 'done' })).toBe(true);
     expect(validateActionObject({ action_type: 'fail' })).toBe(true);
 
-    // Invalid actions (arbitrary commands, invalid fields, etc.)
     expect(validateActionObject({ action_type: 'eval', value: 'alert(1)' })).toBe(false);
-    expect(validateActionObject({ action_type: 'click' })).toBe(false); // missing target
-    expect(validateActionObject({ action_type: 'type', target: 'el-1' })).toBe(false); // missing value
-    expect(validateActionObject({ action_type: 'scroll', value: 'left' })).toBe(false); // only up/down allowed
+    expect(validateActionObject({ action_type: 'click' })).toBe(false);
+    expect(validateActionObject({ action_type: 'type', target: 'el-1' })).toBe(false);
+    expect(validateActionObject({ action_type: 'scroll', value: 'left' })).toBe(false);
   });
 });

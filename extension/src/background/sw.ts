@@ -1,8 +1,3 @@
-/**
- * AEGIS Background Service Worker Entrypoint (ADR-02)
- * Orchestrates Loop Controller, Screenshot Capture, and WebSocket client.
- */
-
 import { slog } from '@aegis/shared';
 import { LoopController } from './loop-controller';
 import type { BusMessage, SessionStateUpdateMessage } from './bus';
@@ -20,9 +15,7 @@ function getOrCreateLoopController(): LoopController {
     loopController = new LoopController({
       onStateChange: (update) => {
         lastKnownState = update;
-        // Broadcast state update to extension pages (Popup, etc.)
         chrome.runtime.sendMessage(update).catch(() => {
-          // No listener open; safe to ignore
         });
       },
     });
