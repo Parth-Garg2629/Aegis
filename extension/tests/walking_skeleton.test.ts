@@ -1,8 +1,3 @@
-/**
- * Unit & Integration Tests for Phase 2 Walking Skeleton Modules
- * Verifies DOM extractor, StableIdRegistry, Context Builder privacy boundary, and Action Executor.
- */
-
 import { describe, it, expect, beforeEach } from 'vitest';
 import { idRegistry } from '../src/content/id-registry';
 import { buildMinimalSanitizedContext } from '../src/background/context-builder';
@@ -25,11 +20,9 @@ describe('Phase 2: Walking Skeleton Unit Tests', () => {
       expect(id1).toMatch(/^el-\d+$/);
       expect(id2).toBe('el-search-box');
 
-      // Idempotency: same element returns same ID
       expect(idRegistry.getOrCreateId(div1)).toBe(id1);
       expect(idRegistry.getOrCreateId(div2)).toBe(id2);
 
-      // Verify DOM was not mutated with custom attributes
       expect(div1.attributes.length).toBe(0);
     });
   });
@@ -77,17 +70,13 @@ describe('Phase 2: Walking Skeleton Unit Tests', () => {
 
       const sanitizedPayload = buildMinimalSanitizedContext(1, rawSchema, capture, null);
 
-      // 1. URL must be normalized to origin + pathname (no query params leaking tokens)
       expect(sanitizedPayload.sanitized_schema.url).toBe('https://scholarships.gov.in/portal/apply');
 
-      // 2. Non-sensitive text input preserved
       expect(sanitizedPayload.sanitized_schema.elements[0].value).toBe('STEM scholarship');
 
-      // 3. Sensitive password value MUST be redacted, never sent raw
       expect(sanitizedPayload.sanitized_schema.elements[1].value).toBe('[REDACTED_PASSWORD]');
       expect(sanitizedPayload.sanitized_schema.elements[1].value).not.toContain('SuperSecretPassword!');
 
-      // 4. Payload has correct step number and format
       expect(sanitizedPayload.step_number).toBe(1);
       expect(sanitizedPayload.screenshot_format).toBe('webp');
     });

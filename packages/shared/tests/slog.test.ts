@@ -16,7 +16,6 @@ describe('Safe Structured Logging (slog)', () => {
       session_id: 'sess-123',
       step_number: 1,
       duration_ms: 45,
-      // Disallowed sensitive fields:
       raw_password: 'superSecretPassword',
       user_aadhaar: '1234 5678 9012',
       inner_html: '<input value="secret"/>',
@@ -30,7 +29,6 @@ describe('Safe Structured Logging (slog)', () => {
     expect(safe.duration_ms).toBe(45);
     expect(safe.timestamp).toBeDefined();
 
-    // Sensitive arbitrary fields must NOT exist in the output
     expect(safe).not.toHaveProperty('raw_password');
     expect(safe).not.toHaveProperty('user_aadhaar');
     expect(safe).not.toHaveProperty('inner_html');

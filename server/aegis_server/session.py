@@ -1,9 +1,3 @@
-"""
-AEGIS Session Manager
-Source of Truth: docs/API_SPEC.md §3, docs/DATABASE_SCHEMA.md §6
-Manages active in-memory browser agent sessions during execution.
-"""
-
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import uuid

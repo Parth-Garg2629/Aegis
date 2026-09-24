@@ -1,15 +1,3 @@
-/**
- * Playwright End-to-End Test for Phase 2 Walking Skeleton
- * Source of Truth: docs/IMPLEMENTATION_PLAN.md Phase 2, docs/BROWSER_AGENT_SPEC.md §3.2
- *
- * Verifies the acceptance criterion:
- * The E2E test must demonstrate at least TWO complete agent cycles:
- *   Cycle 1: capture → context_update → mock action → execute → action_result
- *   Cycle 2: fresh capture → context_update → mock action → execute → action_result
- *
- * Preserves the Sanitized<T> compile-time / privacy boundary (ADR-04).
- */
-
 import { test, expect } from '@playwright/test';
 import { spawn, type ChildProcess } from 'child_process';
 import { createServer, type Server } from 'http';
@@ -38,7 +26,6 @@ const SERVER_PORT = 8765;
 const FIXTURE_PORT = 8766;
 
 test.beforeAll(async () => {
-  // 1. Start static fixture HTTP server on port 8766
   await new Promise<void>((resolvePromise) => {
     staticServer = createServer((req, res) => {
       const filePath = resolve(__dirname, '../../fixtures/fp_01.html');
@@ -56,7 +43,6 @@ test.beforeAll(async () => {
     });
   });
 
-  // 2. Start FastAPI Server on port 8765
   const pyExe = resolve(__dirname, '../../.venv/Scripts/python.exe');
   serverProcess = spawn(
     pyExe,
@@ -67,7 +53,6 @@ test.beforeAll(async () => {
     },
   );
 
-  // Wait for FastAPI server to become healthy
   let healthy = false;
   for (let i = 0; i < 30; i++) {
     try {
@@ -100,11 +85,9 @@ test.afterAll(async () => {
 });
 
 test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async ({ page }) => {
-  // 1. Navigate page to fixture FP-01
   await page.goto(`http://127.0.0.1:${FIXTURE_PORT}`);
   await expect(page.locator('h1')).toHaveText('FP-01: National Scholarship Search');
 
-  // Verify initial DOM state
   const searchInput = page.locator('#search-input');
   const submitButton = page.locator('#submit-button');
   const statusMessage = page.locator('#status-message');
@@ -114,7 +97,6 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
   await expect(searchInput).toHaveValue('');
   await expect(statusMessage).toHaveText('Ready to search.');
 
-  // 2. Establish WebSocket connection to backend
   const ws = new WebSocket(`ws://127.0.0.1:${SERVER_PORT}/ws`);
   await new Promise<void>((resolvePromise, rejectPromise) => {
     ws.addEventListener('open', () => resolvePromise());
@@ -136,7 +118,6 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
     });
   };
 
-  // 3. Initiate Session
   const initMsg: SessionInitMessage = {
     type: 'session_init',
     session_id: null,
@@ -162,12 +143,8 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
   expect(sessionId).toBeTruthy();
   expect(sessionCreated.payload.server_max_steps).toBe(30);
 
-  // ==========================================
-  // CYCLE 1: capture → context_update → mock action → execute → action_result
-  // ==========================================
   console.log('[E2E TEST] Starting Cycle 1...');
 
-  // Cycle 1: Step 1 Capture
   const screenshot1 = await page.screenshot();
   const capture1: CaptureResult = {
     screenshotDataUrl: `data:image/webp;base64,${screenshot1.toString('base64')}`,
@@ -177,7 +154,6 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
     height: 800,
   };
 
-  // Cycle 1: Extract DOM
   const schema1: SanitizedSchema = {
     url: page.url(),
     title: await page.title(),
@@ -208,12 +184,10 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
     ],
   };
 
-  // Cycle 1: Minimal Sanitized Context Builder (preserving Sanitized<T> boundary)
   const sanitizedContext1 = buildMinimalSanitizedContext(1, schema1, capture1, null);
   expect(sanitizedContext1.step_number).toBe(1);
   expect(sanitizedContext1.sanitized_schema.url).toBe(`http://127.0.0.1:${FIXTURE_PORT}/`);
 
-  // Cycle 1: Send context_update
   const ctxUpdateMsg1: ContextUpdateMessage = {
     type: 'context_update',
     session_id: sessionId,
@@ -232,11 +206,9 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
   expect(actionMsg1.payload.action.target).toBe('el-search-input');
   expect(actionMsg1.payload.action.value).toBe('Scholarship Portal');
 
-  // Cycle 1: Execute action on page DOM
   await searchInput.fill(actionMsg1.payload.action.value!);
   await expect(searchInput).toHaveValue('Scholarship Portal');
 
-  // Cycle 1: Send action_result
   const result1: ActionResultPayload = {
     step_number: 1,
     action_type: 'type',
@@ -254,12 +226,8 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
 
   console.log('[E2E TEST] Cycle 1 COMPLETED successfully.');
 
-  // ==========================================
-  // CYCLE 2: fresh capture → context_update → mock action → execute → action_result
-  // ==========================================
   console.log('[E2E TEST] Starting Cycle 2...');
 
-  // Cycle 2: Fresh capture
   const screenshot2 = await page.screenshot();
   const capture2: CaptureResult = {
     screenshotDataUrl: `data:image/webp;base64,${screenshot2.toString('base64')}`,
@@ -269,7 +237,6 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
     height: 800,
   };
 
-  // Cycle 2: Fresh DOM extraction showing updated input value
   const schema2: SanitizedSchema = {
     url: page.url(),
     title: await page.title(),
@@ -306,12 +273,10 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
     success: true,
   };
 
-  // Cycle 2: Minimal Sanitized Context Builder (preserving Sanitized<T> boundary)
   const sanitizedContext2 = buildMinimalSanitizedContext(2, schema2, capture2, prevResult1);
   expect(sanitizedContext2.step_number).toBe(2);
   expect(sanitizedContext2.previous_action_result?.success).toBe(true);
 
-  // Cycle 2: Send context_update
   const ctxUpdateMsg2: ContextUpdateMessage = {
     type: 'context_update',
     session_id: sessionId,
@@ -329,16 +294,13 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
   expect(actionMsg2.payload.action.action_type).toBe('click');
   expect(actionMsg2.payload.action.target).toBe('el-submit-button');
 
-  // Cycle 2: Execute action on page DOM (Click submit button)
   await submitButton.click();
 
-  // Verify page DOM state updated after click!
   const resultsContainer = page.locator('#results-container');
   await expect(resultsContainer).toHaveAttribute('data-status', 'searched');
   await expect(page.locator('#query-echo')).toHaveText('Scholarship Portal');
   await expect(page.locator('#result-card-1')).toBeVisible();
 
-  // Cycle 2: Send action_result
   const result2: ActionResultPayload = {
     step_number: 2,
     action_type: 'click',
@@ -356,9 +318,6 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
 
   console.log('[E2E TEST] Cycle 2 COMPLETED successfully.');
 
-  // ==========================================
-  // Terminal Cycle: Completion
-  // ==========================================
   const sanitizedContext3 = buildMinimalSanitizedContext(3, schema2, capture2, {
     action_type: 'click',
     target_element_id: 'el-submit-button',
@@ -381,7 +340,6 @@ test('Walking Skeleton demonstrates TWO complete agent cycles on FP-01', async (
   expect(actionMsg3.payload.step_number).toBe(3);
   expect(actionMsg3.payload.action.action_type).toBe('done');
 
-  // Send session_end
   ws.send(
     JSON.stringify({
       type: 'session_end',

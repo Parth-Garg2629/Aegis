@@ -1,8 +1,3 @@
-/**
- * AEGIS Popup Controller (Work Package B7 / Integration)
- * Coordinates UI inputs and displays live agent loop state from Service Worker.
- */
-
 import { slog } from '@aegis/shared';
 import type { BusMessage, SessionStateUpdateMessage, StartSessionMessage, CancelSessionMessage } from '../../background/bus';
 
@@ -41,7 +36,6 @@ function updateUI(update: SessionStateUpdateMessage): void {
   }
 }
 
-// Fetch current session state on open
 if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
   chrome.runtime.sendMessage({ type: 'GET_SESSION_STATE' }, (response: SessionStateUpdateMessage) => {
     if (response) {
@@ -49,7 +43,6 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
     }
   });
 
-  // Listen for real-time broadcasts from Service Worker
   chrome.runtime.onMessage.addListener((message: BusMessage) => {
     if (message.type === 'SESSION_STATE_UPDATE') {
       updateUI(message);

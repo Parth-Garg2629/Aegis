@@ -1,8 +1,3 @@
-"""
-AEGIS Server Main Entrypoint
-FastAPI application mounting WebSocket gateway and health endpoints.
-"""
-
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from aegis_server.ws_gateway import handle_websocket_connection

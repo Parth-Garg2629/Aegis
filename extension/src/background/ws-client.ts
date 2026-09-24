@@ -1,12 +1,3 @@
-/**
- * AEGIS WebSocket Client (Work Package B1)
- * Source of Truth: docs/API_SPEC.md §3, docs/TECHNICAL_SPEC.md §11, docs/IMPLEMENTATION_PLAN.md B1
- *
- * Implements typed WebSocket client for extension background service worker.
- * Enforces the Sanitized<T> compile-time privacy boundary (ADR-04): sendContextUpdate
- * strictly accepts only Sanitized<ContextUpdatePayload>.
- */
-
 import type {
   ActionMessage,
   ActionResultPayload,
@@ -140,7 +131,6 @@ export class AegisWebSocketClient {
           break;
 
         case 'pong':
-          // Heartbeat received
           break;
 
         default:
@@ -173,10 +163,6 @@ export class AegisWebSocketClient {
     this.send(msg);
   }
 
-  /**
-   * Statically enforces the privacy boundary: only Sanitized<ContextUpdatePayload>
-   * may be transmitted over the network (ADR-04).
-   */
   public sendContextUpdate(payload: Sanitized<ContextUpdatePayload>): void {
     if (!this.sessionId) {
       throw new Error('Cannot send context_update without an active session ID');

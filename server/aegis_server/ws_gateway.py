@@ -1,9 +1,3 @@
-"""
-AEGIS FastAPI WebSocket Gateway (Work Package E1)
-Source of Truth: docs/API_SPEC.md §3, §5-§10, docs/IMPLEMENTATION_PLAN.md E1
-Handles real-time bi-directional WebSocket communication between Extension and Backend.
-"""
-
 from datetime import datetime, timezone
 import json
 from typing import Any, Dict
@@ -57,7 +51,6 @@ async def handle_websocket_connection(websocket: WebSocket) -> None:
 
             msg_type = data.get("type")
 
-            # 1. session_init
             if msg_type == "session_init":
                 try:
                     init_msg = SessionInitMessage.model_validate(data)
@@ -93,7 +86,6 @@ async def handle_websocket_connection(websocket: WebSocket) -> None:
                     )
                     await websocket.send_text(err_msg.model_dump_json())
 
-            # 2. context_update
             elif msg_type == "context_update":
                 try:
                     ctx_msg = ContextUpdateMessage.model_validate(data)
@@ -131,7 +123,6 @@ async def handle_websocket_connection(websocket: WebSocket) -> None:
                     )
                     await websocket.send_text(err_msg.model_dump_json())
 
-            # 3. action_result
             elif msg_type == "action_result":
                 try:
                     result_msg = ActionResultMessage.model_validate(data)
@@ -145,7 +136,6 @@ async def handle_websocket_connection(websocket: WebSocket) -> None:
                 except Exception as e:
                     slog.warn(module="WS_GATEWAY", event="ACTION_RESULT_PARSE_ERROR", message=str(e))
 
-            # 4. session_end
             elif msg_type == "session_end":
                 try:
                     end_msg = SessionEndMessage.model_validate(data)
@@ -162,7 +152,6 @@ async def handle_websocket_connection(websocket: WebSocket) -> None:
                 except Exception as e:
                     slog.warn(module="WS_GATEWAY", event="SESSION_END_PARSE_ERROR", message=str(e))
 
-            # 5. ping
             elif msg_type == "ping":
                 try:
                     ping_msg = PingMessage.model_validate(data)

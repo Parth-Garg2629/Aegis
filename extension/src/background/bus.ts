@@ -1,8 +1,3 @@
-/**
- * AEGIS Service Worker Internal Message Bus (Work Package B1)
- * Facilitates typed message exchange between Popup, Service Worker, and Content Script.
- */
-
 import type { ActionObject, ActionResultPayload, SanitizedSchema } from '@aegis/protocol';
 
 export type BusMessageType =

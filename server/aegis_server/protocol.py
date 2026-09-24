@@ -1,12 +1,6 @@
-"""
-AEGIS Server Protocol Models (Pydantic v2)
-Source of Truth: docs/API_SPEC.md v1.0
-"""
-
 from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field
 
-# Envelope Types
 MessageType = Literal[
     "session_init",
     "context_update",
@@ -31,7 +25,6 @@ class BaseEnvelope(BaseModel):
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 
-# Client Metadata
 class ClientMetadata(BaseModel):
     extension_version: str
     browser: Literal["chrome", "edge"]
@@ -39,7 +32,6 @@ class ClientMetadata(BaseModel):
     max_steps: int = Field(ge=1, le=100, default=30)
 
 
-# 7.1 session_init
 class SessionInitPayload(BaseModel):
     goal: str = Field(min_length=1, max_length=1000)
     client_metadata: ClientMetadata
@@ -51,7 +43,6 @@ class SessionInitMessage(BaseEnvelope):
     payload: SessionInitPayload
 
 
-# 8.1 session_created
 class SessionCreatedPayload(BaseModel):
     server_max_steps: int = Field(ge=1, le=100, default=30)
 
@@ -62,7 +53,6 @@ class SessionCreatedMessage(BaseEnvelope):
     payload: SessionCreatedPayload
 
 
-# DOM / Schema Models
 class BoundingBox(BaseModel):
     x: float
     y: float
@@ -110,7 +100,6 @@ class PreviousActionResult(BaseModel):
     local_input_status: Optional[Literal["LOCAL_INPUT_PROVIDED", "LOCAL_INPUT_CANCELLED"]] = None
 
 
-# 7.2 context_update
 class ContextUpdatePayload(BaseModel):
     step_number: int = Field(ge=1)
     agent_state: Literal["running", "paused", "confirming"]
@@ -126,7 +115,6 @@ class ContextUpdateMessage(BaseEnvelope):
     payload: ContextUpdatePayload
 
 
-# 8.2 action
 ActionType = Literal["click", "type", "scroll", "select", "hover", "wait", "done", "fail"]
 
 
@@ -148,7 +136,6 @@ class ActionMessage(BaseEnvelope):
     payload: ActionPayload
 
 
-# 7.6 action_result
 class ActionResultPayload(BaseModel):
     step_number: int = Field(ge=1)
     action_type: str
@@ -164,7 +151,6 @@ class ActionResultMessage(BaseEnvelope):
     payload: ActionResultPayload
 
 
-# 7.5 action_denied
 class ActionDeniedPayload(BaseModel):
     step_number: int = Field(ge=1)
     denied_action_type: str
@@ -178,7 +164,6 @@ class ActionDeniedMessage(BaseEnvelope):
     payload: ActionDeniedPayload
 
 
-# 7.3 session_resume
 class SessionResumePayload(BaseModel):
     last_known_step: int = Field(ge=0)
 
@@ -189,7 +174,6 @@ class SessionResumeMessage(BaseEnvelope):
     payload: SessionResumePayload
 
 
-# 8.4 session_resumed
 class SessionResumedPayload(BaseModel):
     resumed: bool
     server_step: Optional[int] = None
@@ -202,7 +186,6 @@ class SessionResumedMessage(BaseEnvelope):
     payload: SessionResumedPayload
 
 
-# 7.4 session_end
 SessionEndReason = Literal[
     "goal_achieved",
     "agent_failed",
@@ -225,7 +208,6 @@ class SessionEndMessage(BaseEnvelope):
     payload: SessionEndPayload
 
 
-# 8.3 session_error
 class SessionErrorPayload(BaseModel):
     error_code: str
     error_message: str
@@ -239,7 +221,6 @@ class SessionErrorMessage(BaseEnvelope):
     payload: SessionErrorPayload
 
 
-# 7.7 ping & 8.5 pong
 class PingMessage(BaseEnvelope):
     type: Literal["ping"] = "ping"
     session_id: str

@@ -1,11 +1,3 @@
-/**
- * AEGIS Loop Controller State Machine (Work Package B5)
- * Source of Truth: docs/BROWSER_AGENT_SPEC.md §3.2, §9, docs/TECHNICAL_SPEC.md §3
- *
- * Coordinates the perception-action loop:
- * CAPTURE -> MINIMAL SANITIZED CONTEXT -> WEBSOCKET SEND -> AWAIT ACTION -> EXECUTE -> RESULT -> NEXT CYCLE
- */
-
 import type {
   ActionMessage,
   ActionObject,
@@ -118,7 +110,6 @@ export class LoopController {
     this.previousResult = null;
     this.transition('starting');
 
-    // Identify active tab
     if (targetTabId) {
       this.activeTabId = targetTabId;
     } else if (typeof chrome !== 'undefined' && chrome.tabs) {
@@ -197,14 +188,11 @@ export class LoopController {
         step_number: this.currentStep,
       });
 
-      // 1. Capture active tab
       this.transition('capturing');
       const captureResult = await captureActiveTab(this.activeTabId || undefined);
 
-      // 2. Extract DOM schema from content script
       const domSchema = await this.extractDomFromActiveTab();
 
-      // 3. Build minimal sanitized context (preserving compile-time Sanitized<T> boundary)
       this.transition('sanitizing');
       const sanitizedPayload = buildMinimalSanitizedContext(
         this.currentStep,
@@ -213,7 +201,6 @@ export class LoopController {
         this.previousResult,
       );
 
-      // 4. Transmit context_update over WebSocket
       this.transition('awaiting_action');
       const actionPromise = new Promise<ActionObject>((resolve, reject) => {
         this.pendingActionResolver = resolve;
@@ -240,7 +227,6 @@ export class LoopController {
         reasoning: action.reasoning || undefined,
       });
 
-      // 5. Handle terminal actions or dispatch to executor
       if (action.action_type === 'done') {
         const result: ActionResultPayload = {
           step_number: this.currentStep,
@@ -264,11 +250,9 @@ export class LoopController {
         break;
       }
 
-      // 6. Execute action in content script
       const executionResult = await this.executeActionInActiveTab(action);
       this.previousResult = executionResult;
 
-      // 7. Send action_result back to server
       this.wsClient.sendActionResult(executionResult);
 
       slog.info({
@@ -278,14 +262,12 @@ export class LoopController {
         success: executionResult.success,
       });
 
-      // Advance to next cycle
       this.currentStep++;
     }
   }
 
   private async extractDomFromActiveTab(): Promise<SanitizedSchema> {
     if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs) {
-      // Fallback empty schema if no tab attached
       return { url: 'http://localhost/fixtures/fp_01.html', title: 'FP-01 Fixture', elements: [] };
     }
 

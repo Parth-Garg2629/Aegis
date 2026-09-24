@@ -1,9 +1,3 @@
-/**
- * AEGIS Protocol Package
- * Source of Truth: docs/API_SPEC.md v1.0
- */
-
-// Envelope and Common Types
 export type MessageType =
   | 'session_init'
   | 'context_update'
@@ -26,7 +20,6 @@ export interface MessageEnvelope<T = unknown> {
   payload: T;
 }
 
-// Client Metadata
 export interface ClientMetadata {
   extension_version: string;
   browser: 'chrome' | 'edge';
@@ -34,7 +27,6 @@ export interface ClientMetadata {
   max_steps: number;
 }
 
-// 7.1 session_init
 export interface SessionInitPayload {
   goal: string;
   client_metadata: ClientMetadata;
@@ -44,7 +36,6 @@ export type SessionInitMessage = MessageEnvelope<SessionInitPayload> & {
   session_id: null;
 };
 
-// 8.1 session_created
 export interface SessionCreatedPayload {
   server_max_steps: number;
 }
@@ -53,7 +44,6 @@ export type SessionCreatedMessage = MessageEnvelope<SessionCreatedPayload> & {
   session_id: string;
 };
 
-// DOM Elements & Forms in context_update
 export interface BoundingBox {
   x: number;
   y: number;
@@ -101,7 +91,6 @@ export interface PreviousActionResult {
   local_input_status?: 'LOCAL_INPUT_PROVIDED' | 'LOCAL_INPUT_CANCELLED' | null;
 }
 
-// 7.2 context_update
 export interface ContextUpdatePayload {
   step_number: number;
   agent_state: 'running' | 'paused' | 'confirming';
@@ -115,7 +104,6 @@ export type ContextUpdateMessage = MessageEnvelope<ContextUpdatePayload> & {
   session_id: string;
 };
 
-// 8.2 action
 export type ActionType =
   | 'click'
   | 'type'
@@ -142,7 +130,6 @@ export type ActionMessage = MessageEnvelope<ActionPayload> & {
   session_id: string;
 };
 
-// 7.6 action_result
 export interface ActionResultPayload {
   step_number: number;
   action_type: string;
@@ -156,7 +143,6 @@ export type ActionResultMessage = MessageEnvelope<ActionResultPayload> & {
   session_id: string;
 };
 
-// 7.5 action_denied
 export interface ActionDeniedPayload {
   step_number: number;
   denied_action_type: string;
@@ -168,7 +154,6 @@ export type ActionDeniedMessage = MessageEnvelope<ActionDeniedPayload> & {
   session_id: string;
 };
 
-// 7.3 session_resume
 export interface SessionResumePayload {
   last_known_step: number;
 }
@@ -177,7 +162,6 @@ export type SessionResumeMessage = MessageEnvelope<SessionResumePayload> & {
   session_id: string;
 };
 
-// 8.4 session_resumed
 export interface SessionResumedPayload {
   resumed: boolean;
   server_step?: number | null;
@@ -188,7 +172,6 @@ export type SessionResumedMessage = MessageEnvelope<SessionResumedPayload> & {
   session_id: string;
 };
 
-// 7.4 session_end
 export type SessionEndReason =
   | 'goal_achieved'
   | 'agent_failed'
@@ -207,7 +190,6 @@ export type SessionEndMessage = MessageEnvelope<SessionEndPayload> & {
   session_id: string;
 };
 
-// 8.3 session_error
 export interface SessionErrorPayload {
   error_code: string;
   error_message: string;
@@ -219,7 +201,6 @@ export type SessionErrorMessage = MessageEnvelope<SessionErrorPayload> & {
   session_id: string;
 };
 
-// 7.7 ping & 8.5 pong
 export type PingPayload = Record<string, never>;
 export type PingMessage = MessageEnvelope<PingPayload> & {
   type: 'ping';
@@ -232,7 +213,6 @@ export type PongMessage = MessageEnvelope<PongPayload> & {
   session_id: string;
 };
 
-// Union types
 export type ClientMessage =
   | SessionInitMessage
   | ContextUpdateMessage
@@ -251,7 +231,6 @@ export type ServerMessage =
 
 export type AegisMessage = ClientMessage | ServerMessage;
 
-// Validation helpers
 export function validateEnvelope(msg: unknown): msg is MessageEnvelope {
   if (typeof msg !== 'object' || msg === null) return false;
   const candidate = msg as Partial<MessageEnvelope>;
@@ -278,7 +257,6 @@ export function validateActionObject(action: unknown): action is ActionObject {
   ];
   if (!a.action_type || !allowedTypes.includes(a.action_type)) return false;
 
-  // Validate action-specific constraints from API_SPEC §8.2
   switch (a.action_type) {
     case 'click':
     case 'hover':

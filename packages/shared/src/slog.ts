@@ -1,8 +1,3 @@
-/**
- * Safe Structured Logging (ADR-12, SECURITY_PRIVACY.md §20, PI-06)
- * Accepts strictly whitelisted fields only to prevent accidental PII leakage.
- */
-
 export const ALLOWED_LOG_FIELDS = new Set([
   'timestamp',
   'level',
