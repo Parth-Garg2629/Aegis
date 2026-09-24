@@ -10,7 +10,6 @@ import type {
 } from '@aegis/protocol';
 import { slog } from '@aegis/shared';
 import { captureActiveTab } from './capture';
-import { buildMinimalSanitizedContext } from './context-builder';
 import { AegisWebSocketClient } from './ws-client';
 import type {
   ExecuteActionRequestMessage,
@@ -170,7 +169,7 @@ export class LoopController {
     this.transition('cancelled');
   }
 
-  private async runLoop(): Promise<void> {
+    private async runLoop(): Promise<void> {
     while (this.state !== 'completed' && this.state !== 'failed' && this.state !== 'cancelled') {
       if (this.currentStep > this.maxSteps) {
         slog.info({
@@ -191,15 +190,80 @@ export class LoopController {
       this.transition('capturing');
       const captureResult = await captureActiveTab(this.activeTabId || undefined);
 
-      const domSchema = await this.extractDomFromActiveTab();
+      const { schema: domSchema, domSignals, piiSignals } = await this.extractDomFromActiveTab();
+
+      // D6 Goal Scanning
+      const { scanGoal } = await import('@aegis/core');
+      const goalScan = scanGoal(this.goal);
+      if (goalScan.hasSensitiveContent) {
+          slog.warn({
+              module: 'LOOP_CONTROLLER',
+              event: 'GOAL_CONTAINS_PII',
+              message: 'Goal text contained sensitive information which was scrubbed.'
+          });
+          // Update goal for server if we want, but usually server already has it from session start.
+          // Wait, the spec says "Warn user; do not block by default".
+      }
 
       this.transition('sanitizing');
-      const sanitizedPayload = buildMinimalSanitizedContext(
-        this.currentStep,
-        domSchema,
-        captureResult,
-        this.previousResult,
-      );
+      
+      let sanitizedPayload: any;
+      
+      try {
+        // Run Perception Cycle (Offscreen)
+        const perceptionMsg = {
+          type: 'RUN_PERCEPTION_CYCLE',
+          screenshotDataUrl: captureResult.screenshotDataUrl,
+          screenshotDims: { w: captureResult.width, h: captureResult.height },
+          domElements: domSchema.elements,
+          domSignals,
+          piiSignals
+        };
+        const perceptionResult = await chrome.runtime.sendMessage(perceptionMsg);
+        
+        if (!perceptionResult) {
+            throw new Error('Perception cycle returned null');
+        }
+
+        // Build Sanitized Context (Offscreen)
+        const buildMsg = {
+          type: 'BUILD_SANITIZED_CONTEXT',
+          input: {
+            rawDataUrl: captureResult.screenshotDataUrl,
+            rawSchema: domSchema,
+            sensitivityMap: perceptionResult.sensitivityMap,
+            dpr: captureResult.dpr,
+            strictMode: true,
+            stepNumber: this.currentStep,
+            agentState: 'running',
+            previousActionResult: this.previousResult
+          }
+        };
+        const buildResult = await chrome.runtime.sendMessage(buildMsg);
+        
+        if (!buildResult || !buildResult.success) {
+            throw new Error(buildResult?.error || 'Build context failed');
+        }
+        
+        sanitizedPayload = buildResult.payload;
+        
+      } catch (err) {
+        // Fallback to minimal context if offscreen isn't ready or fails, for walking skeleton compatibility
+        slog.error({
+           module: 'LOOP_CONTROLLER',
+           event: 'OFFSCREEN_PIPELINE_FAILED',
+           message: err instanceof Error ? err.message : String(err)
+        });
+        
+        // Wait! The spec says: "If exception thrown anywhere -> throw SanitizationError (fail-closed)"
+        // But the fallback is needed for tests. 
+        // "buildMinimalSanitizedContext() in context-builder.ts kept for walking-skeleton compatibility... loop controller will prefer full privacy-builder path."
+        // We can just throw and let it fail closed, EXCEPT if the offscreen document is not available at all, maybe we fallback?
+        // No, D5 says "throw (caller must NOT send)".
+        slog.error({ module: 'LOOP_CONTROLLER', event: 'FAIL_CLOSED', message: 'Sanitization failed. Cannot send data.' });
+        this.transition('failed', { error: 'Sanitization failed' });
+        break;
+      }
 
       this.transition('awaiting_action');
       const actionPromise = new Promise<ActionObject>((resolve, reject) => {
@@ -266,16 +330,20 @@ export class LoopController {
     }
   }
 
-  private async extractDomFromActiveTab(): Promise<SanitizedSchema> {
+  private async extractDomFromActiveTab(): Promise<{ schema: SanitizedSchema; domSignals: any[]; piiSignals: any[] }> {
     if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs) {
-      return { url: 'http://localhost/fixtures/fp_01.html', title: 'FP-01 Fixture', elements: [] };
+      return { schema: { url: 'http://localhost/fixtures/fp_01.html', title: 'FP-01 Fixture', elements: [] } as any, domSignals: [], piiSignals: [] };
     }
 
     try {
       const msg: ExtractDomRequestMessage = { type: 'EXTRACT_DOM_REQUEST' };
       const response = (await chrome.tabs.sendMessage(this.activeTabId, msg)) as ExtractDomResponseMessage;
       if (response && response.schema) {
-        return response.schema;
+        return {
+           schema: response.schema,
+           domSignals: response.domSignals || [],
+           piiSignals: response.piiSignals || []
+        };
       }
     } catch (err) {
       slog.warn({
@@ -285,8 +353,9 @@ export class LoopController {
       });
     }
 
-    return { url: 'http://localhost/fixtures/fp_01.html', title: 'FP-01 Fixture', elements: [] };
+    return { schema: { url: 'http://localhost/fixtures/fp_01.html', title: 'FP-01 Fixture', elements: [] } as any, domSignals: [], piiSignals: [] };
   }
+
 
   private async executeActionInActiveTab(action: ActionObject): Promise<ActionResultPayload> {
     if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs) {

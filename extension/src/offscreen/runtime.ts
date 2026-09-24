@@ -2,7 +2,7 @@ import { slog } from '@aegis/shared';
 import type { DecodeConfig, DomElementRef } from '@aegis/core';
 import { AegisFaceDetector } from './face';
 import { VisualModelManager } from './model-manager';
-import { runPerceptionCycle, type PerceptionCycleInput, type PerceptionCycleResult } from './pipeline';
+import { runPerceptionCycle, type PerceptionCycleInput } from './pipeline';
 
 const CLASS_NAMES = [
   'button',
@@ -63,41 +63,72 @@ async function initPerception(): Promise<void> {
 
 void initPerception();
 
+import { getIframeSensitivityRegions } from '@aegis/core';
+import { buildSanitizedContext, type PrivacyBuildInput } from './privacy-builder';
+
 export interface RunPerceptionCycleMessage {
   type: 'RUN_PERCEPTION_CYCLE';
   screenshotDataUrl: string;
   screenshotDims: { w: number; h: number };
   domElements: DomElementRef[];
+  domSignals?: any[];
+  piiSignals?: any[];
+}
+
+export interface BuildSanitizedContextMessage {
+  type: 'BUILD_SANITIZED_CONTEXT';
+  input: PrivacyBuildInput;
 }
 
 if (hasChromeRuntime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener(
-    (message: RunPerceptionCycleMessage, _sender, sendResponse: (response: PerceptionCycleResult | null) => void) => {
-      if (message?.type !== 'RUN_PERCEPTION_CYCLE') return false;
+    (message: RunPerceptionCycleMessage | BuildSanitizedContextMessage, _sender, sendResponse: (response: any) => void) => {
+      if (message?.type === 'RUN_PERCEPTION_CYCLE') {
+        const input: PerceptionCycleInput = {
+          screenshotDataUrl: message.screenshotDataUrl,
+          screenshotDims: message.screenshotDims,
+          domElements: message.domElements,
+          domSignals: message.domSignals || [],
+          piiSignals: message.piiSignals || [],
+        };
+        
+        // Apply D7 iframe policy
+        const iframeSignals = getIframeSensitivityRegions(message.domElements as any[], 'blur');
+        input.domSignals.push(...iframeSignals);
 
-      const input: PerceptionCycleInput = {
-        screenshotDataUrl: message.screenshotDataUrl,
-        screenshotDims: message.screenshotDims,
-        domElements: message.domElements,
-        domSignals: [],
-        piiSignals: [],
-      };
-
-      runPerceptionCycle(input, {
-        visual: visualReady ? { modelManager, decodeConfig, sourceModel: 'aegis-nano-v1' } : null,
-        faceDetector: faceReady ? faceDetector : null,
-      })
-        .then((result) => sendResponse(result))
-        .catch((err: unknown) => {
-          slog.error({
-            module: 'OFFSCREEN_RUNTIME',
-            event: 'PERCEPTION_CYCLE_FAILED',
-            message: err instanceof Error ? err.message : String(err),
+        runPerceptionCycle(input, {
+          visual: visualReady ? { modelManager, decodeConfig, sourceModel: 'aegis-nano-v1' } : null,
+          faceDetector: faceReady ? faceDetector : null,
+        })
+          .then((result) => sendResponse(result))
+          .catch((err: unknown) => {
+            slog.error({
+              module: 'OFFSCREEN_RUNTIME',
+              event: 'PERCEPTION_CYCLE_FAILED',
+              message: err instanceof Error ? err.message : String(err),
+            });
+            sendResponse(null);
           });
-          sendResponse(null);
-        });
 
-      return true;
+        return true;
+      }
+      
+      if (message?.type === 'BUILD_SANITIZED_CONTEXT') {
+         buildSanitizedContext(message.input)
+           .then(res => sendResponse({ success: true, payload: res }))
+           .catch(err => {
+             slog.error({
+               module: 'OFFSCREEN_RUNTIME',
+               event: 'BUILD_SANITIZED_CONTEXT_FAILED',
+               message: err instanceof Error ? err.message : String(err),
+             });
+             sendResponse({ success: false, error: err instanceof Error ? err.message : String(err) });
+           });
+           
+         return true;
+      }
+      
+      return false;
     },
   );
 }

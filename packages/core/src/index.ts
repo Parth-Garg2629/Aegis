@@ -2,3 +2,8 @@ export * from './types';
 export * from './fusion';
 export * from './visual';
 export * from './face';
+export * from './heuristics';
+export * from './dom-rules';
+export * from './schema-sanitizer';
+export * from './goal-scanner';
+export * from './iframe-policy';

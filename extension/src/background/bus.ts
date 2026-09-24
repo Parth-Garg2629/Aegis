@@ -41,6 +41,8 @@ export interface ExtractDomResponseMessage {
   type: 'EXTRACT_DOM_RESPONSE';
   schema: SanitizedSchema;
   elementsCount: number;
+  domSignals: any[]; // Changed from any to any[]
+  piiSignals: any[]; // Changed from any to any[]
 }
 
 export interface ExecuteActionRequestMessage {

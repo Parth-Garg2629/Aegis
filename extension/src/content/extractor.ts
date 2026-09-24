@@ -3,6 +3,8 @@ import { slog } from '@aegis/shared';
 import { idRegistry } from './id-registry';
 import './executor';
 import type { ExtractDomRequestMessage, ExtractDomResponseMessage } from '../background/bus';
+import { analyzeDomElement, detectPii } from '@aegis/core';
+import type { NormalizedSignal } from '@aegis/core';
 
 const INTERACTIVE_SELECTORS = [
   'input',
@@ -16,6 +18,7 @@ const INTERACTIVE_SELECTORS = [
   '[role="checkbox"]',
   '[role="combobox"]',
   '[tabindex]:not([tabindex="-1"])',
+  'iframe' // Added iframe for iframe policy
 ].join(', ');
 
 function isElementVisible(el: Element, rect: DOMRect): boolean {
@@ -65,28 +68,13 @@ function resolveLabel(el: Element): string | null {
   return null;
 }
 
-function isSensitiveField(inputEl: HTMLInputElement | HTMLTextAreaElement): boolean {
-  const type = (inputEl.getAttribute('type') || '').toLowerCase();
-  if (type === 'password') return true;
-
-  const autocomplete = (inputEl.getAttribute('autocomplete') || '').toLowerCase();
-  const sensitiveTokens = ['password', 'current-password', 'new-password', 'cc-number', 'cc-csc', 'cc-exp'];
-  if (sensitiveTokens.some((token) => autocomplete.includes(token))) {
-    return true;
-  }
-
-  const name = (inputEl.getAttribute('name') || '').toLowerCase();
-  if (['password', 'passwd', 'pin', 'cvv', 'ssn', 'aadhaar'].some((t) => name.includes(t))) {
-    return true;
-  }
-
-  return false;
-}
-
-export function extractDom(): SanitizedSchema {
+export function extractDom(): { schema: SanitizedSchema; domSignals: NormalizedSignal[]; piiSignals: NormalizedSignal[] } {
   const rawElements = Array.from(document.querySelectorAll(INTERACTIVE_SELECTORS));
   const elements: SanitizedElement[] = [];
   const formsMap = new Map<string, { action?: string | null; method?: 'GET' | 'POST'; elementIds: string[] }>();
+  
+  const domSignals: NormalizedSignal[] = [];
+  const piiSignals: NormalizedSignal[] = [];
 
   for (const el of rawElements) {
     const rect = el.getBoundingClientRect();
@@ -114,17 +102,6 @@ export function extractDom(): SanitizedSchema {
       formsMap.get(parentFormId)!.elementIds.push(stableId);
     }
 
-    let value: string | null = null;
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
-      if (isSensitiveField(el)) {
-        value = '[REDACTED_PASSWORD]';
-      } else {
-        value = el.value ? el.value.slice(0, 200) : null;
-      }
-    } else if (el instanceof HTMLSelectElement) {
-      value = el.value || null;
-    }
-
     const boundingBox: BoundingBox = {
       x: Math.round(rect.x),
       y: Math.round(rect.y),
@@ -132,9 +109,60 @@ export function extractDom(): SanitizedSchema {
       height: Math.round(rect.height),
     };
 
+    const textContent = el.textContent?.trim() || null;
+    let value: string | null = null;
+    
+    // Create an object conforming to what analyzeDomElement expects
+    const analysisTarget = {
+      id: stableId,
+      tagName,
+      type,
+      name: el.getAttribute('name'),
+      autocomplete: el.getAttribute('autocomplete'),
+      'aria-label': el.getAttribute('aria-label'),
+      placeholder: el.getAttribute('placeholder'),
+      boundingBox: { x: boundingBox.x, y: boundingBox.y, w: boundingBox.width, h: boundingBox.height }
+    };
+    
+    const signals = analyzeDomElement(analysisTarget);
+    domSignals.push(...signals);
+
+    // If it's a password, redact immediately at source
+    if (signals.some(s => s.category === 'PASSWORD')) {
+       value = '[REDACTED_PASSWORD]';
+    } else {
+       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+         value = el.value ? el.value.slice(0, 200) : null;
+       } else if (el instanceof HTMLSelectElement) {
+         value = el.value || null;
+       }
+    }
+
+    // Run heuristics on visible text
+    if (textContent) {
+      const pii = detectPii(textContent);
+      for (const p of pii) {
+        piiSignals.push({
+          signalId: `pii-${stableId}-${Math.random().toString(36).slice(2)}`,
+          source: 'HEURISTIC_PII',
+          elementId: stableId,
+          boundingBox: { x: boundingBox.x, y: boundingBox.y, w: boundingBox.width, h: boundingBox.height },
+          category: p.category,
+          confidence: p.confidence,
+          evidence: p.evidence
+        });
+      }
+    }
+
     const isInteractive = true;
     const isDisabled = el.hasAttribute('disabled');
     const isReadOnly = el.hasAttribute('readonly');
+    
+    // Read all attributes for schema
+    const attributes: Record<string, string | null> = {};
+    for (const attr of el.attributes) {
+       attributes[attr.name] = attr.value;
+    }
 
     elements.push({
       id: stableId,
@@ -142,7 +170,7 @@ export function extractDom(): SanitizedSchema {
       type: type || null,
       role: role || null,
       label,
-      text: el.textContent?.trim()?.slice(0, 100) || null,
+      text: textContent?.slice(0, 100) || null,
       value,
       boundingBox,
       isVisible: true,
@@ -150,6 +178,7 @@ export function extractDom(): SanitizedSchema {
       isReadOnly,
       isInteractive,
       parentFormId,
+      attributes
     });
   }
 
@@ -163,10 +192,14 @@ export function extractDom(): SanitizedSchema {
   const cleanUrl = `${window.location.origin}${window.location.pathname}`;
 
   return {
-    url: cleanUrl,
-    title: document.title || '',
-    elements,
-    forms,
+    schema: {
+      url: cleanUrl,
+      title: document.title || '',
+      elements,
+      forms,
+    },
+    domSignals,
+    piiSignals
   };
 }
 
@@ -174,11 +207,13 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message: ExtractDomRequestMessage, _sender, sendResponse) => {
     if (message.type === 'EXTRACT_DOM_REQUEST') {
       try {
-        const schema = extractDom();
+        const { schema, domSignals, piiSignals } = extractDom();
         const response: ExtractDomResponseMessage = {
           type: 'EXTRACT_DOM_RESPONSE',
           schema,
           elementsCount: schema.elements.length,
+          domSignals,
+          piiSignals
         };
         sendResponse(response);
       } catch (err: unknown) {
@@ -191,6 +226,8 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
           type: 'EXTRACT_DOM_RESPONSE',
           schema: { url: window.location.href, title: document.title, elements: [] },
           elementsCount: 0,
+          domSignals: [],
+          piiSignals: []
         });
       }
       return true;
