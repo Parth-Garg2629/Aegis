@@ -1,4 +1,5 @@
 from aegis_server.protocol import (
+    ActionObject,
     BoundingBox,
     ContextUpdatePayload,
     SanitizedElement,
@@ -42,7 +43,7 @@ def create_test_context(step: int) -> ContextUpdatePayload:
     return ContextUpdatePayload(
         step_number=step,
         agent_state="running",
-        sanitized_screenshot="data:image/webp;base64,UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAgA0JaQAA3AA/vuUAAA=",
+        sanitized_screenshot="data:image/webp;base64,dummy",
         screenshot_format="webp",
         sanitized_schema=schema,
         previous_action_result=None,
@@ -66,3 +67,30 @@ def test_mock_provider_deterministic_cycles():
     ctx3 = create_test_context(3)
     act3 = provider.generate_action(ctx3, goal="Find STEM scholarship")
     assert act3.action_type == "done"
+
+
+def test_mock_scripted_sequence():
+    """Provide a 3-action script -> returns actions in order -> then done."""
+    script = [
+        ActionObject(action_type="type", target="input1", value="test"),
+        ActionObject(action_type="click", target="btn1"),
+        ActionObject(action_type="wait"),
+    ]
+    provider = MockVLMProvider(script=script)
+
+    ctx = create_test_context(1)
+    
+    a1 = provider.generate_action(ctx, goal="any")
+    assert a1.action_type == "type"
+    assert a1.target == "input1"
+    
+    a2 = provider.generate_action(ctx, goal="any")
+    assert a2.action_type == "click"
+    assert a2.target == "btn1"
+    
+    a3 = provider.generate_action(ctx, goal="any")
+    assert a3.action_type == "wait"
+    
+    a4 = provider.generate_action(ctx, goal="any")
+    assert a4.action_type == "done"
+    assert a4.reasoning == "Script exhausted."

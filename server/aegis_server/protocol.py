@@ -18,7 +18,10 @@ MessageType = Literal[
 
 
 class BaseEnvelope(BaseModel):
-    type: MessageType
+    # type: str here (not strict MessageType Literal) so that unknown message
+    # types pass envelope validation and are silently discarded by the gateway
+    # per API_SPEC §5.2. Each typed message model still enforces its own Literal.
+    type: str
     session_id: Optional[str] = None
     timestamp: str
     protocol_version: Literal["1.0"] = "1.0"
@@ -125,9 +128,16 @@ class ActionObject(BaseModel):
     reasoning: Optional[str] = Field(default=None, max_length=1000)
 
 
+class RiskAssessment(BaseModel):
+    level: Literal["safe", "high_risk", "blocked"]
+    category: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class ActionPayload(BaseModel):
     step_number: int = Field(ge=1)
     action: ActionObject
+    risk_assessment: Optional[RiskAssessment] = None
 
 
 class ActionMessage(BaseEnvelope):

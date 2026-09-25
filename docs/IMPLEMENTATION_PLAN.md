@@ -19,6 +19,14 @@ Source Documents:
 
 # AEGIS — Implementation Plan
 
+> [!NOTE]
+> **CURRENT PROJECT STATE:**
+> - Phases A, B, and C are **COMPLETE**.
+> - Phase D is **IMPLEMENTED AND TESTED** (`pnpm verify` and privacy tests PASS).
+> - **Phase E is the CURRENT ACTIVE IMPLEMENTATION PHASE.**
+> 
+> *The "Build Workflow at a Glance" and "Day-by-Day Schedule" sections below reflect the original full-project Day 1 to Day 7 plan and are preserved as historical context.*
+
 ## Build Workflow at a Glance
 
 *One page: how the application is built, in order. The frontend is the browser extension; the backend is the FastAPI server. Detail for each step is in §7 (work packages) and §9 (schedule).*
@@ -259,15 +267,12 @@ Effort is PROPOSED. **Deliverable** is what a reviewer can run; **Accept** ties 
 
 ### 7.5 Track E — Server and Agent (R5)
 
+> [!NOTE]
+> **Phase E is the current active phase.** The historical E1–E7 summary has been replaced by the definitive **Phase E Detailed Implementation Plan** in §18. Please refer to §18 for the canonical E1–E9 work packages.
+
 | WP | Work | Deliverable | Accept | pd | Pri |
 |----|------|-------------|--------|----|-----|
-| E1 | **FastAPI gateway**: WS endpoint, envelope + payload validation (generated Pydantic), in-memory sessions, step-number correlation, size limit (~2 MB), `ping`/`pong`, `session_resume`, demo-grade token, `127.0.0.1` bind, error codes `E-SRV-*` | Server passes contract tests | AG-07 | 2 | P0 |
-| E2 | **VLM orchestrator**: system prompt file (verbatim BROWSER_AGENT_SPEC §4.2), per-cycle template, last-5 action history, image encoding, Ollama client with `format` schema, temperature 0, `keep_alive`, timeout, one retry, output normalization, `fail` on parse failure | Real action from a real VLM | AG-10, VC-05 | 2 | P0 |
-| E3 | **Provider abstraction**: `ollama`, `cloud` (OpenAI-compatible URL; key only in server env), and a **`mock` provider that replays a scripted action list** — needed for the walking skeleton and deterministic tests | Swap by config | RL-05 | 1 | P0 |
-| E4 | **Audit DB**: SQLite tables from DATABASE_SCHEMA §6.6–6.9, metadata only (no goal text), pruning | Rows per step | RD-12, CP-06 | 1 | P0 |
-| E5 | **Server View** (`/view`): live feed of received frames, schema with placeholders highlighted, prompt/action, bytes; canary badge slot | Inspector D1 | CP-08 | 1 | P0 |
-| E6 | **VC-05 harness**: ≥ 40 labelled states; compare candidate VLMs on sanitized vs raw (offline, local-only) | Model choice + utility retention | VC-05 | 1.5 | P0 |
-| E7 | Server tests: stale actions, malformed messages, concurrent sessions, oversize payloads | pytest suite | SAC-07/08/09 | 1 | P1 |
+| E1–E9 | **See canonical breakdown in §18** | Full agent loop | All E tests | 11.5 | P0/P1 |
 
 ### 7.6 Track F — Fixtures, Evaluation, and Demo (R6)
 
@@ -290,9 +295,9 @@ Effort is PROPOSED. **Deliverable** is what a reviewer can run; **Accept** ties 
 | B Extension core | 10 | 0 |
 | C Perception ML | 9.5 | 0.5 |
 | D Sanitization | 7.5 | 0 |
-| E Server and agent | 8.5 | 1 |
+| E Server and agent | 10.5 | 1 |
 | F Eval and demo | 10.5 | 1.5 |
-| **Total** | **50.5** | **3.5** |
+| **Total** | **52.5** | **3.5** |
 
 ---
 
@@ -559,6 +564,756 @@ Datasets such as WebPII (cited in the PPT) are optional stretch material; check 
 | 5 | Local vs cloud VLM (DEMO OQ-DF-02) | Decide at S3 from measured latency |
 | 6 | Build the Inspector? (DEMO OQ-DF-05) | Server View (E5) yes; Device View only if capacity allows |
 | 7 | Adopt the cut list order in §11.1 | Yes, agree it now rather than under pressure |
+
+---
+
+---
+
+## 18. Phase E — Detailed Implementation Plan (Server / Agent / Decision / Safe-Action)
+
+### 18.1 Phase E Objective
+
+Phase E turns the sanitized browser context produced by Phases A–D into a controlled agent loop. The server receives `Sanitized<ContextUpdate>` over WebSocket, invokes a VLM provider (starting with the deterministic Mock VLM), validates the proposed action, evaluates risk, and returns a schema-valid action for client-side execution.
+
+**VLM is UNTRUSTED.** The VLM proposes actions; deterministic server-side validation, schema checking, and safety policy remain authoritative.
+
+```
+Extension → Sanitized Context → WebSocket → Session Manager → Agent Orchestrator
+→ VLM Provider → Proposed Action → Schema Validation → Target / State Validation
+→ Risk & Safety Validation → Approved Action → WebSocket → Extension → Action Result → Next Cycle
+```
+
+### 18.2 Phase E — Privacy Boundary Map
+
+Phase E code operates entirely on the server side of the privacy boundary. All data arriving at the server has already passed through the `Sanitized<T>` gate (ADR-04). The following are **prohibited from ever being present on the server**:
+
+| Prohibited Data | Enforcement |
+|----------------|-------------|
+| Raw DOM | Never transmitted by client (PI-01). Server protocol models have no field for it. |
+| Raw screenshot | Never transmitted. Server sees only `sanitized_screenshot` (base64 WebP, regions destroyed). |
+| Raw PII values (Aadhaar, PAN, card, email, phone) | Replaced by `[REDACTED_*]` placeholders in `sanitized_schema` before transmission (PI-02). |
+| Passwords and OTPs | Replaced by `[REDACTED_PASSWORD]` / `[REDACTED_OTP]` (PI-02). |
+| Credentials, auth tokens, cookies | Never collected or transmitted (PI-06). |
+| `localStorage` / `sessionStorage` | Not transmitted (TECHNICAL_SPEC §11.2). |
+| Raw SensitivityMap | Local-only. Never serialized to the wire (API_SPEC §4.2). |
+| `[NEEDS_LOCAL_INPUT]` resolved values | Never transmitted. Only `LOCAL_INPUT_PROVIDED` status crosses the boundary. |
+
+**Server-side enforcement points:**
+- `protocol.py` Pydantic models: only accept `SanitizedSchema` / `sanitized_screenshot` fields — no raw data fields exist in the schema.
+- `slog.py`: whitelisted fields only. No raw content can appear in logs.
+- `audit_db.py` (if enabled): `action_value_safe` is never raw PII. `vlm_reasoning` is untrusted metadata — never executable, never contains PII.
+- VLM prompt construction: page text is placed inside a structured schema block, never interpolated into the system prompt. Reasoning text is never treated as executable instructions.
+
+### 18.3 Dependency Graph
+
+```
+E1 (Gateway Hardening)
+ │
+ ├──→ E2 (Session Management)
+ │     │
+ │     ├──→ E3 (VLM Provider / Mock)
+ │     │     │
+ │     │     └──→ E4 (Agent Orchestrator)
+ │     │           │
+ │     │           ├──→ E5 (Action Validation)
+ │     │           │     │
+ │     │           │     └──→ E6 (Risk / Safety Engine)
+ │     │           │
+ │     │           └──→ E7 (Audit Persistence) [optional, parallel with E5/E6]
+ │     │
+ │     └──→ E8 (Server View) [parallel with E4–E6]
+ │
+ └──→ E9 (Evaluation Harness) [after E3–E6]
+```
+
+**Implementable sequence:** E1 → E2 → E3 → E4 → E5 → E6 → E7 (optional) / E8 (parallel) → E9
+
+### 18.4 Work Packages
+
+---
+
+#### WP E1 — Server / WebSocket Gateway Hardening
+
+| Field | Value |
+|-------|-------|
+| **ID** | E1 |
+| **Name** | Server / WebSocket Gateway Hardening |
+| **Objective** | Harden the existing FastAPI WebSocket gateway with proper protocol validation, size limits, timeouts, error codes, demo-grade token auth, and safe disconnect handling. |
+| **Dependencies** | None (builds on existing Phase A skeleton) |
+
+**Existing files/components reused:**
+- [`server/aegis_server/main.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/main.py) — FastAPI app
+- [`server/aegis_server/ws_gateway.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/ws_gateway.py) — WebSocket handler
+- [`server/aegis_server/protocol.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/protocol.py) — Pydantic models
+- [`server/aegis_server/slog.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/slog.py) — Safe logging
+- [`packages/shared/src/constants.ts`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/packages/shared/src/constants.ts) — `E-SRV-*` error codes
+
+**Files expected to be created/modified:**
+- `server/aegis_server/ws_gateway.py` — major hardening
+- `server/aegis_server/main.py` — `127.0.0.1` bind enforcement, Sec-WebSocket-Protocol
+- `server/aegis_server/protocol.py` — add `session_resume` handling validation
+- `server/tests/test_ws_gateway.py` — expanded test suite
+
+**Implementation tasks:**
+1. **Message size limit:** reject WebSocket text frames exceeding ~2 MB with `E-SRV-03` error and close the socket cleanly.
+2. **Envelope validation:** validate every inbound message against `BaseEnvelope` before type dispatch. Reject malformed envelopes with `E-PROTO-01`.
+3. **Unknown message types:** silently discard with a `slog.warn` (no raw content logged), per API_SPEC §5.2.
+4. **`session_resume` handling:** implement `session_resume` → `session_resumed` flow. If the session exists and is in `DISCONNECTED_GRACE` state, resume. If expired or unknown, return `session_error`.
+5. **Step-number correlation:** reject `context_update` if `payload.step_number` does not equal `session.current_step` (server-side defense-in-depth). Return `E-SRV-05`.
+6. **Demo-grade token auth (ADR-11):** read `AEGIS_AUTH_TOKEN` from environment. If set, validate against the token provided via the approved transport mechanism (e.g., query parameter or auth header). The auth token must never be logged, persisted in the audit DB, exposed in Server View, or included in VLM prompts. If not set, skip auth (localhost demo mode). `127.0.0.1` bind by default.
+7. **Connection lifecycle timeouts:** idle connection timeout (no messages for 120 s → close). VLM timeout at `context_update` processing (30 s default → `E-SRV-06`).
+8. **Ping/pong keep-alive:** existing implementation works; add heartbeat timeout tracking to session state.
+9. **Graceful disconnect/reconnect:** on `WebSocketDisconnect`, transition session to `DISCONNECTED_GRACE` state. Start a reconnect grace timer (60 s configurable). If reconnect arrives, resume. If timer expires, terminate session and release all session data.
+10. **Error code standardization:** use `E-SRV-01` through `E-SRV-08` per `packages/shared/src/constants.ts`. Ensure all error responses use `SessionErrorMessage`.
+
+**Protocol/API changes:** None. Uses existing message types. `session_resume` handler is new server-side logic for an already-defined protocol message.
+
+**Privacy/security requirements:**
+- Error messages must never include raw payload content. Use error codes and safe descriptions only.
+- `slog` for all logging — no `print()` or `logging.getLogger()`.
+- Bind `127.0.0.1` by default (ADR-11, SD-08).
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_malformed_json_rejected` | Unit | Send non-JSON text → expect `E-PROTO-01` error |
+| `test_unknown_message_type_discarded` | Unit | Send `{"type":"invented"}` → no crash, no response |
+| `test_oversized_message_rejected` | Unit | Send >2 MB text frame → expect `E-SRV-03` or socket close |
+| `test_missing_envelope_fields` | Unit | Omit `type`/`timestamp` → expect `E-PROTO-01` |
+| `test_step_number_correlation` | Unit | Send `context_update` with wrong step_number → expect `E-SRV-05` |
+| `test_session_resume_valid` | Integration | Disconnect, reconnect with `session_resume`, verify session resumes |
+| `test_session_resume_expired` | Unit | Resume unknown session → expect `session_error` |
+| `test_idle_timeout` | Integration | Connect without sending → expect disconnect after timeout |
+| `test_ping_pong` | Unit | Send `ping` → receive `pong` with matching session_id |
+| `test_auth_token_when_configured` | Unit | Set `AEGIS_AUTH_TOKEN`, send init without token → reject |
+| `test_existing_walking_skeleton_regression` | Regression | Existing `test_websocket_walking_skeleton_cycles` still passes |
+
+**Acceptance criteria:**
+- All `E-SRV-*` error codes are exercised in tests.
+- Oversized, malformed, and invalid messages never crash the server.
+- `session_resume` works for disconnected sessions within grace period.
+- Walking skeleton test (Phase A) remains green.
+- Server binds `127.0.0.1` by default.
+
+**Verification commands:**
+```powershell
+cd c:\Users\ishan\OneDrive\Desktop\Aegis
+python -m pytest server/tests/test_ws_gateway.py -v
+pnpm verify
+```
+
+**Definition of Done:** All gateway tests pass. No `print()` statements. All logging through `slog`. Existing A–D tests remain green. Server binds `127.0.0.1`. Oversized/malformed messages handled gracefully.
+
+---
+
+#### WP E2 — Session Management
+
+| Field | Value |
+|-------|-------|
+| **ID** | E2 |
+| **Name** | Session Management |
+| **Objective** | Extend the existing `SessionManager` with full lifecycle, state machine, isolation, reconnect semantics, and privacy constraints. |
+| **Dependencies** | E1 |
+
+**Existing files/components reused:**
+- [`server/aegis_server/session.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/session.py) — `Session` and `SessionManager`
+
+**Files expected to be created/modified:**
+- `server/aegis_server/session.py` — major expansion
+- `server/tests/test_session.py` — new test file
+
+**Implementation tasks:**
+1. **Session state machine:** Add `state` field: `INIT → ACTIVE → WAITING_CONTEXT → INFERRING → DISCONNECTED_GRACE → TERMINATED`. Enforce valid state transitions.
+2. **Session isolation:** Each session has its own `goal`, `action_history`, `current_step`, `max_steps`. No cross-session data access.
+3. **Action history window:** Implement a FIFO deque of the last 5 `ActionHistoryItem` objects per session (per DATABASE_SCHEMA §6.5). Include `step_number`, `action_type`, `target`, `value` (safe only — `[LOCAL_INPUT_PROVIDED]` for sensitive), `reasoning`, `execution_success`, `error_code`.
+4. **Step counting:** Enforce server-side `max_steps` (min of client and server). Reject `context_update` if `step_number > max_steps`. Return `session_error` with termination signal.
+5. **Reconnect grace:** Store `disconnect_time`. Allow reconnection within grace period (60 s default, configurable). On reconnect, verify `last_known_step` vs `session.current_step`. Respond with `session_resumed`.
+6. **Session termination:** On `session_end`, transition to `TERMINATED`, clear `action_history`, clear `latest_context` (sanitized screenshot/schema). Session data must not persist after termination.
+7. **Latest context buffer:** Store the most recent `sanitized_screenshot` and `sanitized_schema` per session (for VLM prompt assembly). Replace on every `context_update`. Purge on session close.
+8. **Concurrent sessions:** Support multiple simultaneous sessions (keyed by `session_id`). No global state shared between sessions.
+9. **Session cleanup:** Background cleanup of stale `DISCONNECTED_GRACE` sessions after grace period expires.
+10. **Privacy invariant:** `Session` must never store raw PII, passwords, raw DOM, raw screenshots. Only sanitized data arrives at the server.
+
+**Protocol/API changes:** None. Implements behavior for existing protocol messages.
+
+**Privacy/security requirements:**
+- `action_history` must record `[LOCAL_INPUT_PROVIDED]` instead of sensitive values.
+- `goal` text is stored in memory only while session is active. Cleared on termination.
+- All session data is in-memory only. No disk persistence of session state.
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_session_state_transitions` | Unit | Verify valid state transitions; reject invalid ones |
+| `test_session_isolation` | Unit | Create two sessions; verify no cross-session data leakage |
+| `test_action_history_fifo` | Unit | Record >5 actions; verify window slides correctly |
+| `test_max_steps_enforcement` | Unit | Session at max_steps rejects further context_updates |
+| `test_session_termination_cleanup` | Unit | After `terminate()`, action_history and context are cleared |
+| `test_reconnect_within_grace` | Unit | Disconnect and reconnect within 60 s → resumed |
+| `test_reconnect_after_grace_expired` | Unit | Disconnect and attempt reconnect after 61 s → rejected |
+| `test_concurrent_sessions` | Unit | Create/interact with two sessions simultaneously |
+| `test_action_history_sensitive_value_redacted` | Privacy | Store action with `[NEEDS_LOCAL_INPUT]` → value stored as `[LOCAL_INPUT_PROVIDED]` |
+
+**Acceptance criteria:**
+- Session state machine enforced. Invalid transitions raise errors.
+- Terminated sessions release all data.
+- Action history window size ≤ 5.
+- Concurrent sessions do not interfere.
+
+**Verification commands:**
+```powershell
+python -m pytest server/tests/test_session.py -v
+pnpm verify
+```
+
+**Definition of Done:** Session lifecycle fully managed. State transitions enforced. Action history window operational. Concurrent sessions isolated. All session tests pass. A–D tests remain green.
+
+---
+
+#### WP E3 — VLM Provider / Mock Provider
+
+| Field | Value |
+|-------|-------|
+| **ID** | E3 |
+| **Name** | VLM Provider Abstraction and Mock Provider |
+| **Objective** | Define a formal provider interface (abstract base class), harden the Mock VLM for deterministic testing with configurable scripted action sequences, and harden the Ollama provider with proper timeout/error/retry behavior. |
+| **Dependencies** | E2 |
+
+**Existing files/components reused:**
+- [`server/aegis_server/providers/mock.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/providers/mock.py) — MockVLMProvider
+- [`server/aegis_server/providers/ollama.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/providers/ollama.py) — OllamaProvider
+- [`server/aegis_server/providers/__init__.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/providers/__init__.py)
+- [`server/aegis_server/prompts/system_v1.txt`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/prompts/system_v1.txt)
+
+**Files expected to be created/modified:**
+- `server/aegis_server/providers/base.py` — new abstract base class
+- `server/aegis_server/providers/mock.py` — enhance with scripted action lists
+- `server/aegis_server/providers/ollama.py` — harden with retry, structured `format` schema, proper timeout
+- `server/aegis_server/providers/__init__.py` — export base class
+- `server/tests/test_mock_provider.py` — expanded tests
+- `server/tests/test_providers.py` — new provider interface tests
+
+**Implementation tasks:**
+1. **Abstract base class (`VLMProvider`):** Define `generate_action(context, goal, action_history) → ActionObject` as an abstract method. All providers inherit from this.
+2. **Mock provider enhancement:** Accept a scripted `List[ActionObject]` in constructor. Return actions in sequence by step number. When script is exhausted, return `done`. Support multiple configurable scripts for different test scenarios (FP-01 flow, failure scenario, stuck scenario).
+3. **Provider interface contract:** `generate_action` receives only sanitized data (`ContextUpdatePayload`). Provider must never see raw data (enforced by type system — the orchestrator only passes sanitized payloads).
+4. **Ollama provider hardening:**
+   a. Use Ollama's `format` parameter with the ActionObject JSON schema (not just `"json"`).
+   b. Set `temperature: 0`, `keep_alive: "5m"`, `num_predict: 2048`.
+   c. Timeout: 30 s (configurable). On timeout → one retry. On second timeout → return `ActionObject(action_type="fail", reasoning="VLM timeout")`.
+   d. Output normalization: lowercase `action_type`, trim `target`/`value`/`reasoning`, null-ify empty strings.
+   e. Parse failure → one retry with re-sent context. Second failure → `fail` action.
+5. **Cloud provider stub:** Add `server/aegis_server/providers/cloud.py` — OpenAI-compatible endpoint. Key from `VLM_API_KEY` env var. Same interface, same timeout/retry behavior. **Not required for Phase E completion** — stub with `NotImplementedError` is acceptable.
+6. **Provider selection:** `VLM_PROVIDER` env var → `mock` (default), `ollama`, `cloud`. Factory function in `providers/__init__.py`.
+7. **Safe handling of untrusted VLM output (Fail Closed):** All VLM responses are treated as untrusted. Output is strictly validated. Malformed output, unexpected fields, invalid action types, and schema violations are explicitly REJECTED (fail-closed) and never partially trusted. Reasoning text is untrusted metadata and NEVER executable. After a single retry failure, return the defined `fail` action.
+8. **Per-cycle prompt template:** Implement the prompt template from BROWSER_AGENT_SPEC §4.3 in the Ollama provider. Include `max_steps`, action history (last 5), and previous action result.
+
+**Protocol/API changes:** None.
+
+**Privacy/security requirements:**
+- Provider never receives raw PII — only `ContextUpdatePayload` (which contains sanitized data).
+- VLM reasoning is untrusted metadata — never persisted as executable.
+- Ollama API key (if any) and Cloud API key live only in server environment variables, never logged.
+- System prompt loaded from file (`system_v1.txt`) — not dynamically generated.
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_mock_scripted_sequence` | Unit | Provide a 3-action script → returns actions in order → then `done` |
+| `test_mock_deterministic` | Unit | Same inputs → same outputs (existing test preserved) |
+| `test_provider_interface_contract` | Unit | All providers implement `VLMProvider` ABC |
+| `test_ollama_timeout_returns_fail` | Unit (mocked HTTP) | Simulate Ollama timeout → fail action returned |
+| `test_ollama_parse_failure_retry` | Unit (mocked HTTP) | First response invalid → retry → valid response accepted |
+| `test_ollama_double_failure_returns_fail` | Unit (mocked HTTP) | Two parse failures → fail action returned |
+| `test_output_normalization` | Unit | Action with uppercase type, untrimmed strings → normalized |
+| `test_invalid_action_type_from_vlm` | Unit | VLM returns `"execute_script"` → reject → fail action |
+| `test_provider_factory` | Unit | `VLM_PROVIDER=mock` → MockVLMProvider; `VLM_PROVIDER=ollama` → OllamaProvider |
+
+**Acceptance criteria:**
+- Mock provider supports configurable scripted action lists.
+- Ollama provider handles timeout, retry, parse failure gracefully.
+- All providers conform to the abstract `VLMProvider` interface.
+- Provider swap by environment variable.
+- Existing walking skeleton test remains green with mock provider.
+
+**Verification commands:**
+```powershell
+python -m pytest server/tests/test_mock_provider.py server/tests/test_providers.py -v
+pnpm verify
+```
+
+**Definition of Done:** Provider abstraction established. Mock provider supports scripted scenarios. Ollama provider handles errors gracefully. Cloud provider stubbed. All provider tests pass. A–D tests remain green.
+
+---
+
+#### WP E4 — Agent Orchestrator
+
+| Field | Value |
+|-------|-------|
+| **ID** | E4 |
+| **Name** | Agent Orchestrator |
+| **Objective** | Build the complete agent orchestration loop: receive sanitized context, construct the VLM prompt, invoke the provider, handle the action/result cycle, and enforce termination conditions. |
+| **Dependencies** | E2, E3 |
+
+**Existing files/components reused:**
+- [`server/aegis_server/orchestrator.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/orchestrator.py) — existing skeleton
+- [`server/aegis_server/prompts/system_v1.txt`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/prompts/system_v1.txt)
+
+**Files expected to be created/modified:**
+- `server/aegis_server/orchestrator.py` — major expansion
+- `server/aegis_server/prompt_builder.py` — new module for prompt construction
+- `server/tests/test_orchestrator.py` — new test file
+
+**Implementation tasks:**
+1. **Prompt construction (`prompt_builder.py`):**
+   a. Load system prompt from `prompts/system_v1.txt` (verbatim, per ADR, §12.7).
+   b. Build per-cycle user prompt per BROWSER_AGENT_SPEC §4.3 template: goal, current step, max_steps, action history (last 5 formatted), previous action result, sanitized schema JSON.
+   c. **Page text as data, not instructions:** sanitized_schema is serialized as a JSON block. Never interpolated into the system prompt text.
+   d. Action history privacy: replace any `[NEEDS_LOCAL_INPUT]` resolved values with `[LOCAL_INPUT_PROVIDED]`.
+2. **Orchestrator loop:**
+   a. Receive `ContextUpdatePayload` + `Session`.
+   b. Validate step number against session state.
+   c. Build prompt from session context + action history.
+   d. Invoke `VLMProvider.generate_action()`.
+   e. Receive `ActionObject` from provider.
+   f. Return action to gateway for validation pipeline (E5/E6) before sending to client.
+3. **Action history recording:** After provider returns an action, record it in `session.action_history` (FIFO window of 5).
+4. **VLM invocation timing:** Record `vlm_latency_ms` for audit/metrics (if audit is enabled).
+5. **Termination signal handling:** If VLM returns `done` or `fail`, the orchestrator marks the action appropriately. The gateway sends it and expects `session_end` from client.
+6. **Max-step enforcement (server-side):** If `context.step_number >= session.max_steps`, return `fail` action with reasoning "Maximum step limit reached" instead of invoking the VLM.
+7. **Error handling:** If the VLM provider raises an unexpected exception, catch it, log via `slog`, and return `ActionObject(action_type="fail", reasoning="Internal server error")`.
+
+**Protocol/API changes:** None. The orchestrator produces `ActionObject` which is already part of the existing `ActionMessage` schema.
+
+**Privacy/security requirements:**
+- Orchestrator only handles sanitized data (it receives `ContextUpdatePayload` which is already sanitized).
+- Prompt builder never includes raw PII — it works with placeholder values.
+- VLM reasoning text is never executed or interpolated into the system prompt.
+- Timing data (latency) is safe metadata — no PII.
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_prompt_builder_template` | Unit | Verify prompt includes goal, step, max_steps, schema, history |
+| `test_prompt_builder_action_history_format` | Unit | Verify last-5 history formatted correctly |
+| `test_prompt_builder_sensitive_value_redacted` | Privacy | Action with local_input → history shows `[LOCAL_INPUT_PROVIDED]` |
+| `test_orchestrator_invokes_provider` | Unit | Context → provider called → action returned |
+| `test_orchestrator_records_action_history` | Unit | After decide_next_action, session.action_history updated |
+| `test_orchestrator_max_steps_returns_fail` | Unit | Step at max → fail action without VLM call |
+| `test_orchestrator_provider_exception_returns_fail` | Unit | Provider raises → fail action returned |
+| `test_orchestrator_vlm_latency_recorded` | Unit | Latency measurement stored (if audit enabled) |
+| `test_full_3_step_cycle_with_mock` | Integration | 3-step walking skeleton through orchestrator with mock VLM |
+
+**Acceptance criteria:**
+- Prompt matches BROWSER_AGENT_SPEC §4.3 template.
+- Action history window of last 5 actions populated correctly.
+- Max-steps enforced server-side.
+- Provider exceptions handled gracefully.
+- Walking skeleton test passes end-to-end.
+
+**Verification commands:**
+```powershell
+python -m pytest server/tests/test_orchestrator.py -v
+python -m pytest server/tests/ -v
+pnpm verify
+```
+
+**Definition of Done:** Orchestrator builds correct prompts, invokes provider, records history, enforces max-steps. All orchestrator tests pass. Walking skeleton regression green. A–D tests remain green.
+
+---
+
+#### WP E5 — Action Validation (Server-Side)
+
+| Field | Value |
+|-------|-------|
+| **ID** | E5 |
+| **Name** | Server-Side Action Validation |
+| **Objective** | Validate every VLM-proposed action on the server side before sending to the client: closed vocabulary, schema validation, target validation, and rejection of malformed VLM output. |
+| **Dependencies** | E4 |
+
+**Existing files/components reused:**
+- [`packages/core/src/validation/index.ts`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/packages/core/src/validation/index.ts) — TS-side validation (reference implementation for parity)
+- [`packages/protocol/src/index.ts`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/packages/protocol/src/index.ts) — `validateActionObject()`
+- [`server/aegis_server/protocol.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/protocol.py) — `ActionObject` Pydantic model
+
+**Files expected to be created/modified:**
+- `server/aegis_server/action_validator.py` — new module
+- `server/aegis_server/orchestrator.py` — integrate validation after VLM response
+- `server/tests/test_action_validator.py` — new test file
+
+**Implementation tasks:**
+1. **Server vs. Client Authority:**
+   - **SERVER-SIDE (E5):** Enforces closed action vocabulary, structural validation, rejection of malformed output, schema adherence, and that the target existed in the *latest sanitized schema*. Provides safety defense-in-depth.
+   - **CLIENT-SIDE (Executor):** Remains authoritative for actual browser execution, live-DOM validation, stale element detection, visibility/actionability, and disabled-state checks. Server-side validation does NOT prove the live DOM is still valid.
+2. **Closed action vocabulary:** Validate `action_type` is one of the 8 allowed types: `click`, `type`, `scroll`, `select`, `hover`, `wait`, `done`, `fail`. Reject all others.
+3. **Per-action-type field requirements (mirror TS validation):**
+   - `click`, `hover`: require non-empty `target`.
+   - `type`: require non-empty `target` and `value` (string).
+   - `scroll`: require `value` in `{"up", "down"}`.
+   - `select`: require non-empty `target` and `value`.
+   - `wait`, `done`, `fail`: no required fields.
+4. **Target validation against schema:** If action has a `target`, verify the target element ID exists in the current `sanitized_schema.elements`. If target is stale/missing → reject with `E-VAL-02`.
+5. **Value safety check:** Reject `type` actions whose `value` contains script-injection patterns: `javascript:`, `<script`, `eval(`, `onclick=`, `onerror=`. These are blocked patterns (BROWSER_AGENT_SPEC §7.2).
+6. **Reasoning text safety:** Reasoning is untrusted metadata. It must never be executed. Truncate to 1000 chars. Log only via `slog` safe fields.
+7. **No arbitrary code execution:** The server must never `eval()`, `exec()`, or otherwise execute any string from the VLM response.
+8. **Validation result:** Return `ValidationResult(valid, error_code, error_message)`. On validation failure, the orchestrator returns `ActionObject(action_type="fail", reasoning="Action validation failed: {error}")`.
+9. **Integration with orchestrator:** After VLM returns an action, run it through `validate_action()` before returning to the gateway.
+
+**Protocol/API changes:** None. Validation is internal server logic.
+
+**Privacy/security requirements:**
+- Validation error messages must not include raw PII or payload content.
+- No code execution of VLM output — ever.
+- Reasoning text is never interpreted as executable instructions.
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_valid_click_action` | Unit | Valid click with existing target → passes |
+| `test_click_missing_target` | Unit | Click with no target → rejected |
+| `test_invalid_action_type` | Unit | `action_type="execute_script"` → rejected |
+| `test_type_requires_value` | Unit | Type action without value → rejected |
+| `test_scroll_value_restriction` | Unit | Scroll with value="left" → rejected |
+| `test_target_not_in_schema` | Unit | Click on `el-99` when schema has `el-1` only → `E-VAL-02` |
+| `test_script_injection_blocked` | Unit | Type value containing `javascript:` → rejected |
+| `test_reasoning_truncated` | Unit | 2000-char reasoning → truncated to 1000 |
+| `test_valid_done_action` | Unit | Done with no target/value → passes |
+| `test_valid_fail_action` | Unit | Fail with reasoning → passes |
+| `test_select_requires_target_and_value` | Unit | Select without value → rejected |
+
+**Acceptance criteria:**
+- All 8 action types validated per their field requirements.
+- Target validated against current schema elements.
+- Script injection patterns blocked.
+- Invalid VLM output never reaches the client.
+- Parity with TS-side `validateActionObject()` logic.
+
+**Verification commands:**
+```powershell
+python -m pytest server/tests/test_action_validator.py -v
+pnpm verify
+```
+
+**Definition of Done:** All action validation tests pass. Invalid actions never returned to client. Walking skeleton regression green. A–D tests remain green.
+
+---
+
+#### WP E6 — Risk / Safety Engine (Server-Side)
+
+| Field | Value |
+|-------|-------|
+| **ID** | E6 |
+| **Name** | Server-Side Risk / Safety Engine |
+| **Objective** | Implement deterministic risk classification on the server side, mirroring the client-side risk engine. Classify actions as `safe`, `high_risk` (require_confirmation), or `blocked` per BROWSER_AGENT_SPEC §7. Tag actions with risk metadata for the client-side confirmation flow. |
+| **Dependencies** | E5 |
+
+**Existing files/components reused:**
+- [`packages/core/src/risk-engine/index.ts`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/packages/core/src/risk-engine/index.ts) — client-side reference implementation
+- [`packages/shared/src/constants.ts`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/packages/shared/src/constants.ts) — `RISK_CATEGORIES`, `HR-01` through `HR-07`
+
+**Files expected to be created/modified:**
+- `server/aegis_server/risk_engine.py` — new module
+- `server/aegis_server/orchestrator.py` — integrate risk evaluation
+- `server/aegis_server/protocol.py` — add `risk_assessment` field to `ActionPayload` (optional metadata)
+- `server/tests/test_risk_engine.py` — new test file
+
+**Implementation tasks:**
+1. **Blocked actions (deny):**
+   a. External navigation: `click` on `<a>` with `href` to a different domain → `blocked`.
+   b. Script injection patterns in `value`: `javascript:`, `<script`, `eval(`, `onclick=` → `blocked`. (Also enforced by E5, defense-in-depth.)
+2. **High-risk actions (require_confirmation) — HR-01 through HR-07:**
+   a. HR-01 Payment: keyword match on target element label/text/value.
+   b. HR-02 Account deletion: keyword match.
+   c. HR-03 Irreversible data action: keyword match on submit-type buttons.
+   d. HR-04 Financial form submission: click submit in a form containing sensitive fields (inferred from `[REDACTED_*]` placeholders in the sanitized schema — the server cannot see the SensitivityMap, but CAN see placeholders).
+   e. HR-05 Sensitive form submission: click submit in a form with ≥3 fields containing `[REDACTED_*]` placeholders.
+   f. HR-06 Password/credential action: keyword match.
+   g. HR-07 Download initiation: `download` attribute, common download extensions, keyword match.
+3. **Keyword matching:** Case-insensitive. Check element `label`, `text`, `value`, `id`, and `attributes` (where present in sanitized schema). Use whole-word matching for short tokens (per SD-09).
+4. **Conflict resolution:** Blocked > High-risk > Safe (BROWSER_AGENT_SPEC §7.7).
+5. **Risk metadata in action response:** Add an optional `risk_assessment` field to `ActionPayload`: `{ level: "safe"|"high_risk"|"blocked", category: "HR-01"|null, reason: string|null }`. This tells the client which confirmation flow to trigger.
+6. **Protocol/Contract Change:** Adding `risk_assessment` is a formal protocol change. It requires updating `ActionPayload` JSON schema in `packages/protocol`, updating generated TS/Pydantic types, and adding contract tests.
+7. **Risk Engine Parity:** The server-side Python risk engine must have strict parity with the TS risk engine. Implementation must use shared/golden risk vectors. Same input → same classification across both implementations. If they disagree, tests must fail.
+8. **Fail-closed behavior:** Any error during risk evaluation → treat as `blocked`. VLM cannot override safety policy — risk engine decision is authoritative.
+9. **Deterministic policy enforcement:** Risk classification is purely deterministic. No ML, no VLM involvement. Same input → same classification.
+
+**Protocol/API changes:**
+- **Protocol change required:** `ActionPayload` gains an optional `risk_assessment` object. Must update JSON Schemas, TS/Pydantic contracts, and add contract tests.
+
+**Privacy/security requirements:**
+- Risk engine operates on sanitized schema only — it sees `[REDACTED_*]` placeholders, not raw values.
+- Risk evaluation results contain only HR-XX codes and safe descriptions — no PII.
+- VLM cannot override or bypass risk policy.
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_safe_scroll_action` | Unit | Scroll → always `safe` |
+| `test_safe_wait_action` | Unit | Wait → always `safe` |
+| `test_blocked_external_link` | Unit | Click on `<a>` with external `href` → `blocked` |
+| `test_blocked_script_injection` | Unit | Type with `javascript:` value → `blocked` |
+| `test_hr01_payment_keyword` | Unit | Click on "Pay Now" button → `high_risk`, category `HR-01` |
+| `test_hr02_deletion_keyword` | Unit | Click on "Delete Account" → `high_risk`, category `HR-02` |
+| `test_hr04_financial_form` | Unit | Submit form with `[REDACTED_AADHAAR]` field → `high_risk` |
+| `test_hr05_sensitive_form_threshold` | Unit | Form with ≥3 redacted fields → `high_risk` |
+| `test_hr07_download` | Unit | Click element with `download` attribute → `high_risk` |
+| `test_blocked_overrides_high_risk` | Unit | Action matching both blocked and high-risk → `blocked` |
+| `test_fail_closed_on_error` | Unit | Risk engine exception → `blocked` |
+| `test_deterministic_classification` | Property | Same input twice → same output |
+| `test_type_with_local_input_safe` | Unit | Type with `[NEEDS_LOCAL_INPUT]` → `safe` |
+
+**Acceptance criteria:**
+- All HR-01 through HR-07 categories implemented and tested.
+- Blocked actions never reach the client for execution.
+- High-risk actions tagged with `risk_assessment` for client confirmation.
+- Fail-closed behavior on errors.
+- Risk engine is deterministic.
+
+**Verification commands:**
+```powershell
+python -m pytest server/tests/test_risk_engine.py -v
+pnpm verify
+```
+
+**Definition of Done:** All risk categories implemented. All risk tests pass. Integration with orchestrator complete — risk assessment attached to action messages. Walking skeleton regression green. A–D tests remain green.
+
+---
+
+#### WP E7 — Audit Persistence (Optional SQLite)
+
+| Field | Value |
+|-------|-------|
+| **ID** | E7 |
+| **Name** | Optional Audit Persistence |
+| **Objective** | Implement optional SQLite audit logging per DATABASE_SCHEMA §6.6–6.9. Privacy-minimized metadata only. System must function without audit enabled. |
+| **Dependencies** | E4 (records actions from orchestrator). Can be implemented in parallel with E5/E6. |
+
+**Existing files/components reused:**
+- [`docs/DATABASE_SCHEMA.md`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/docs/DATABASE_SCHEMA.md) §6.6–6.10 — table definitions
+
+**Files expected to be created/modified:**
+- `server/aegis_server/audit_db.py` — new module
+- `server/aegis_server/orchestrator.py` — optional audit recording calls
+- `server/aegis_server/ws_gateway.py` — audit session start/end
+- `server/data/.gitkeep` — directory for SQLite file
+- `server/tests/test_audit_db.py` — new test file
+
+**Implementation tasks:**
+1. **Feature flag:** `AUDIT_DB_ENABLED` env var (default: `false`). When disabled, no SQLite file is created, no audit calls execute.
+2. **Database initialization:** Create tables `audit_sessions`, `audit_actions`, `audit_metrics`, `audit_security_events`, `schema_migrations` per DATABASE_SCHEMA §6.6–6.10 DDL.
+3. **WAL mode:** Configure SQLite in WAL mode for async safety.
+4. **Session audit:** On `session_init` → insert `audit_sessions` row. On `session_end` → update `end_time`, `total_steps`, `termination_reason`, `is_success`.
+5. **Action audit:** On each `context_update` → insert `audit_actions` row with: `step_number`, `action_type`, `target_element_id`, `sanitized_target_role`, `value_classification`, `action_value_safe`, `vlm_reasoning` (truncated), `risk_category`, `confirmation_required`, `execution_status`, `error_code`.
+6. **Metrics audit:** Record `vlm_latency_ms`, `screenshot_payload_bytes`, `schema_payload_bytes`, `dom_elements_total` per step.
+7. **Security events:** Record risk confirmations, denials, blocked actions, malformed messages.
+8. **Retention/lifecycle:** Configurable retention period (default: 7 days). Background cleanup of old records.
+9. **No-audit baseline:** All core functionality works identically with `AUDIT_DB_ENABLED=false`.
+
+**Protocol/API changes:** None.
+
+**Privacy/security requirements:**
+- **No raw PII in audit tables.** `action_value_safe` stores only non-sensitive text or `[LOCAL_INPUT_PROVIDED]`.
+- **No raw DOM.** No raw screenshots. No raw SensitivityMap.
+- **No goal text** in `audit_sessions` unless explicitly permitted by an approved debug configuration.
+- **No OTP/password values** anywhere in audit tables.
+- **No credentials, cookies, or auth tokens** in audit tables.
+- **VLM reasoning privacy:** `vlm_reasoning` must NOT be persisted by default. It may only be persisted if explicitly controlled by an approved debug/evaluation configuration, and even then, only as sanitized/privacy-minimized metadata. It is never executable.
+- Database file lives at `server/data/aegis_audit.db`, excluded from version control.
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_audit_disabled_no_db_created` | Unit | `AUDIT_DB_ENABLED=false` → no SQLite file |
+| `test_audit_session_lifecycle` | Unit | Create session → record actions → terminate → verify rows |
+| `test_audit_action_privacy` | Privacy | Action with sensitive value → stored as `[LOCAL_INPUT_PROVIDED]` |
+| `test_audit_no_goal_text` | Privacy | Session row does not contain goal text |
+| `test_audit_no_raw_pii` | Privacy | Insert action → verify no `[REDACTED_*]` raw values stored |
+| `test_audit_metrics_recorded` | Unit | Record metrics → verify latency and count columns |
+| `test_audit_security_event` | Unit | Record risk event → verify row |
+| `test_audit_retention_cleanup` | Unit | Insert old records → cleanup removes them |
+| `test_core_function_without_audit` | Integration | Full walking skeleton with `AUDIT_DB_ENABLED=false` → works |
+
+**Acceptance criteria:**
+- Audit DB created only when `AUDIT_DB_ENABLED=true`.
+- All four tables populated with privacy-minimized metadata.
+- No PII/raw data in any audit table.
+- System works without audit.
+
+**Verification commands:**
+```powershell
+python -m pytest server/tests/test_audit_db.py -v
+pnpm verify
+```
+
+**Definition of Done:** Audit DB optional and functional. Privacy constraints enforced. No-audit baseline tested. All audit tests pass. A–D tests remain green.
+
+---
+
+#### WP E8 — Server View / Operational Visibility
+
+| Field | Value |
+|-------|-------|
+| **ID** | E8 |
+| **Name** | Server View (Operational Visibility) |
+| **Objective** | Provide a read-only HTTP endpoint (`/view`) that shows privacy-safe operational state: active sessions, action lifecycle, agent state, errors. This is the Inspector D1 tier from DEMO_FLOW §8. |
+| **Dependencies** | E2 (sessions), can be implemented in parallel with E4–E6. |
+
+**Existing files/components reused:**
+- [`server/aegis_server/main.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/main.py) — FastAPI app
+- [`server/aegis_server/session.py`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/server/aegis_server/session.py) — session state
+
+**Files expected to be created/modified:**
+- `server/aegis_server/view.py` — new module
+- `server/aegis_server/main.py` — register view routes
+- `server/tests/test_view.py` — new test file
+
+**Implementation tasks:**
+1. **`GET /view/sessions`:** List active sessions with: `session_id`, `state`, `current_step`, `max_steps`, `created_at`, `goal_present` (boolean indicator, NO raw goal text).
+2. **`GET /view/sessions/{session_id}`:** Session detail: state, current step, action history (last 5), latest action type, latest risk assessment, timestamp.
+3. **`GET /view/sessions/{session_id}/latest-context`:** Show the latest sanitized schema (with `[REDACTED_*]` placeholders highlighted), screenshot payload size in bytes, element count, form count. **Never expose the raw screenshot image** in the view — show only metadata (size, format, dimensions if available).
+4. **Privacy-safe response:** All `/view` responses contain only operational metadata. Never expose:
+   - Raw screenshots (even sanitized ones)
+   - Raw DOM
+   - Raw PII, passwords, OTPs, credentials, local input values, secrets
+   - Raw SensitivityMap
+   - Goal text (use boolean `goal_present` or safe identifiers instead)
+5. **HTML view (optional):** Simple HTML page at `/view` that renders session list with auto-refresh. Low priority — JSON API is sufficient for Phase E.
+6. **Canary badge slot:** Reserve a UI element/field for the evaluation wire-tap canary badge (Phase F integration point).
+
+**Protocol/API changes:** New HTTP endpoints (not WebSocket). Internal to the server.
+
+**Privacy/security requirements:**
+- View endpoint is read-only and bound to localhost/demo security assumptions.
+- Never expose raw sensitive data, goal text, or secrets.
+- Do not serve the sanitized screenshot image via HTTP.
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_view_sessions_empty` | Unit | No sessions → empty list |
+| `test_view_sessions_active` | Integration | Create session via WS → `/view/sessions` shows it |
+| `test_view_session_detail` | Integration | Active session → detail endpoint returns state/step |
+| `test_view_goal_truncated` | Privacy | Long goal → view shows first 50 chars only |
+| `test_view_no_screenshot_image` | Privacy | Latest-context endpoint never returns base64 image data |
+| `test_view_unknown_session` | Unit | Request unknown session_id → 404 |
+
+**Acceptance criteria:**
+- `/view/sessions` lists active sessions with safe metadata.
+- Session detail shows action lifecycle.
+- No raw sensitive data exposed.
+- Goal text is not exposed (boolean indicator used instead).
+
+**Verification commands:**
+```powershell
+python -m pytest server/tests/test_view.py -v
+pnpm verify
+```
+
+**Definition of Done:** View endpoints operational. Privacy-safe metadata only. All view tests pass. A–D tests remain green.
+
+---
+
+#### WP E9 — Server-Side Integration and Scenario Harness
+
+| Field | Value |
+|-------|-------|
+| **ID** | E9 |
+| **Name** | Server-Side Integration and Scenario Harness |
+| **Objective** | Create a deterministic server integration harness for testing the agent orchestrator with the mock VLM: scripted scenarios, action validation test cases, failure injection, and latency/step metrics. **This is NOT the Phase F evaluation suite.** It provides deterministic server integration scenarios to prove the Phase E core works independently of real VLM access. |
+| **Dependencies** | E3 (mock VLM), E5 (validation), E6 (risk engine) |
+
+**Existing files/components reused:**
+- Mock VLM provider (E3)
+- Action validator (E5)
+- Risk engine (E6)
+- Test fixtures: [`fixtures/fp_01.html`](file:///c:/Users/ishan/OneDrive/Desktop/Aegis/fixtures/fp_01.html)
+
+**Files expected to be created/modified:**
+- `server/tests/test_eval_harness.py` — new comprehensive test file
+- `server/tests/scenarios/` — new directory with JSON scenario definitions
+- `server/tests/scenarios/fp01_happy_path.json` — scripted 3-step FP-01 scenario
+- `server/tests/scenarios/validation_failures.json` — invalid VLM output scenarios
+- `server/tests/scenarios/risk_blocked.json` — risk-blocked scenarios
+- `server/tests/scenarios/stuck_detection.json` — repeated identical context scenario
+
+**Implementation tasks:**
+1. **Scenario format:** JSON files defining a sequence of `(context_update, expected_action, expected_validation, expected_risk)` tuples. Each scenario has a name, description, and expected outcome.
+2. **Happy path scenario (FP-01):** 3-step flow: type → click → done. Uses mock VLM with scripted actions. Validates the full pipeline: gateway → session → orchestrator → validator → risk engine → response.
+3. **Malformed VLM output scenario:** Mock provider returns invalid action types, missing targets, script injection values. Verify the validator catches all.
+4. **Risk-blocked scenario:** Mock provider returns a "click delete account" action. Verify risk engine blocks or flags it.
+5. **Stale target scenario:** Mock provider returns an action targeting `el-99` when schema only has `el-1`. Verify `E-VAL-02`.
+6. **Max-steps scenario:** Run a mock session to step 30. Verify orchestrator returns `fail` at step 31.
+7. **Session lifecycle scenario:** Init → 3 context_updates → session_end. Verify all state transitions.
+8. **Disconnect/reconnect scenario:** Init → 1 context_update → disconnect → resume → continue.
+9. **Latency measurement:** Record per-step timing in test harness. Report p50/p95 for mock VLM (baseline for comparison with real VLM in Phase F).
+10. **Phase F Boundary:** Full model comparison, large benchmark suites, scoring, wire-tap evaluation, analyzers, and final evaluation remain strictly Phase F responsibilities.
+11. **Regression gate:** All existing Phase A–D tests must pass alongside E9 tests.
+
+**Protocol/API changes:** None.
+
+**Privacy/security requirements:**
+- Test scenarios use only synthetic data (no real PII).
+- Scenarios use `[REDACTED_*]` placeholders in sanitized schemas (consistent with real data flow).
+
+**Tests required:**
+| Test | Type | Description |
+|------|------|-------------|
+| `test_scenario_fp01_happy_path` | Integration | Full 3-step FP-01 flow end-to-end |
+| `test_scenario_invalid_vlm_output` | Integration | Invalid action types caught by validator |
+| `test_scenario_risk_blocked_action` | Integration | High-risk action blocked by risk engine |
+| `test_scenario_stale_target` | Integration | Target not in schema → E-VAL-02 |
+| `test_scenario_max_steps_reached` | Integration | Step 31 → fail action |
+| `test_scenario_session_lifecycle` | Integration | Full session lifecycle with clean termination |
+| `test_scenario_disconnect_reconnect` | Integration | Disconnect and resume within grace period |
+| `test_latency_baseline` | Benchmark | Record and report mock VLM p50/p95 latency |
+| `test_all_phase_ad_regression` | Regression | Existing test suites still pass |
+
+**Acceptance criteria:**
+- All scenario tests pass deterministically.
+- Scenario files provide reusable test fixtures for Phase F.
+- Latency baseline recorded.
+- All A–D tests remain green.
+
+**Verification commands:**
+```powershell
+python -m pytest server/tests/test_eval_harness.py -v
+python -m pytest server/tests/ -v
+pnpm verify
+```
+
+**Definition of Done:** Evaluation harness complete with ≥5 deterministic scenarios. All scenario tests pass. Latency baseline recorded. Regression suite green. A–D tests remain green.
+
+---
+
+### 18.5 Phase E Effort Summary
+
+| WP | Name | Estimated pd | Priority |
+|----|------|:---:|:---:|
+| E1 | Gateway Hardening | 1.5 | P0 |
+| E2 | Session Management | 1.5 | P0 |
+| E3 | VLM Provider / Mock | 1.5 | P0 |
+| E4 | Agent Orchestrator | 1.5 | P0 |
+| E5 | Action Validation | 1.0 | P0 |
+| E6 | Risk / Safety Engine | 1.5 | P0 |
+| E7 | Audit Persistence | 1.0 | P1 |
+| E8 | Server View | 1.0 | P0 |
+| E9 | Server-Side Integration Scenarios | 1.0 | P0 |
+| **Total** | | **11.5** | |
+
+### 18.6 Phase E Test Strategy Summary
+
+| Category | Coverage | Tool |
+|----------|----------|------|
+| **Unit tests** | Action validation, risk classification, session lifecycle, provider interface, prompt building, audit DB | `pytest` |
+| **Integration tests** | Full WebSocket walking skeleton, multi-step scenarios, disconnect/reconnect, view endpoints | `pytest` + `TestClient` |
+| **Privacy tests** | No PII in audit, sensitive value redaction in history, goal truncation in view, no raw screenshot exposure | `pytest` (dedicated privacy test markers) |
+| **Regression tests** | All Phase A–D tests remain green | `pnpm verify` + `pytest` |
+| **Property tests** | Risk engine determinism, action validation completeness | `pytest` + `hypothesis` (optional) |
+| **Scenario tests** | FP-01 happy path, malformed VLM, risk-blocked, stale target, max-steps, stuck, disconnect/reconnect | JSON scenario files + `pytest` |
+
+**Pre-push gate:** `pnpm verify` (TS lint + typecheck + unit tests + manifest diff + bundle scan) + `python -m pytest server/tests/ -v` (all Python tests).
+
+**Privacy regression gate:** Every test run verifies that no `[REDACTED_*]` raw values, passwords, OTPs, or raw PII appear in audit tables, log output, or view endpoints.
 
 ---
 

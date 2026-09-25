@@ -1,10 +1,48 @@
-from typing import Optional
+"""
+mock.py — Mock VLM Provider
+===========================
+E3 Hardening:
+- Implements VLMProvider abstract base class.
+- Supports configurable scripted action sequences.
+- Retains deterministic fallback behavior for regression tests.
+"""
+
+from typing import List, Optional
+
 from aegis_server.protocol import ActionObject, ContextUpdatePayload
+from aegis_server.session import ActionHistoryItem
+from aegis_server.providers.base import VLMProvider
 
 
-class MockVLMProvider:
+class MockVLMProvider(VLMProvider):
+    def __init__(self, script: Optional[List[ActionObject]] = None):
+        """
+        Initialize the mock provider.
+        If a script is provided, it will yield actions from the script sequentially.
+        Otherwise, it falls back to a default deterministic sequence for testing.
+        """
+        self.script = script
+        self._script_index = 0
 
-    def generate_action(self, context: ContextUpdatePayload, goal: Optional[str] = None) -> ActionObject:
+    def generate_action(
+        self,
+        context: ContextUpdatePayload,
+        goal: str,
+        action_history: Optional[List[ActionHistoryItem]] = None,
+    ) -> ActionObject:
+        
+        # 1. Scripted behavior
+        if self.script is not None:
+            if self._script_index < len(self.script):
+                action = self.script[self._script_index]
+                self._script_index += 1
+                return action
+            return ActionObject(
+                action_type="done",
+                reasoning="Script exhausted.",
+            )
+
+        # 2. Default deterministic fallback (for Phase A walking skeleton tests)
         step = context.step_number
         elements = context.sanitized_schema.elements
 
