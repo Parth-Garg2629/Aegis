@@ -32,9 +32,20 @@ temp/
 .DS_Store
 Thumbs.db
 
-eval/runs/*/artifacts/
+eval/runs/
 test-results/
+playwright-report/
+blob-report/
+.playwright/
+coverage/
+.coverage
+htmlcov/
 
 ml/dataset/
 ml/checkpoints/
 ml/train_log.txt
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+

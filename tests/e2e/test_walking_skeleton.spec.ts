@@ -43,7 +43,8 @@ test.beforeAll(async () => {
     });
   });
 
-  const pyExe = resolve(__dirname, '../../.venv/Scripts/python.exe');
+  const venvPy = resolve(__dirname, '../../.venv/Scripts/python.exe');
+  const pyExe = existsSync(venvPy) ? venvPy : 'python';
   serverProcess = spawn(
     pyExe,
     ['-m', 'uvicorn', 'aegis_server.main:app', '--app-dir', 'server', '--host', '127.0.0.1', '--port', String(SERVER_PORT)],
