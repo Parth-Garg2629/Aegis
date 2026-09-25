@@ -53,34 +53,50 @@ class OllamaProvider(MockVLMProvider):
                     "images": images
                 }
             ],
-            "format": {
-                "type": "object",
-                "properties": {
-                    "action_type": {"type": "string", "enum": ["click", "type", "scroll", "select", "hover", "wait", "done", "fail"]},
-                    "target": {"type": ["string", "null"]},
-                    "value": {"type": ["string", "null"]},
-                    "reasoning": {"type": ["string", "null"]}
-                },
-                "required": ["action_type"]
-            },
+            "format": "json",
             "options": {
-                "temperature": 0.0
+                "temperature": 0.0,
+                "num_predict": 2048
             },
             "keep_alive": "5m",
             "stream": False
         }
 
         try:
-            with httpx.Client(timeout=30.0) as client:
+            with httpx.Client(timeout=120.0) as client:
                 response = client.post(f"{self.url}/api/chat", json=payload)
                 response.raise_for_status()
                 result = response.json()
 
-            content = result["message"]["content"]
+            msg_obj = result.get("message", {})
+            content = msg_obj.get("content", "").strip()
+            thinking = msg_obj.get("thinking", "").strip()
+            text_to_search = content if content else thinking
+            
+            import re
+            # Extract JSON block containing action_type
+            json_str = ""
+            matches = re.findall(r'\{[^{}]*"action_type"[^{}]*\}', text_to_search)
+            if matches:
+                json_str = matches[-1]
+            else:
+                blocks = re.findall(r'\{[\s\S]*?\}', text_to_search)
+                for b in reversed(blocks):
+                    try:
+                        j = json.loads(b)
+                        if isinstance(j, dict) and "action_type" in j:
+                            json_str = b
+                            break
+                    except Exception:
+                        continue
+            
+            if not json_str:
+                json_str = text_to_search
+
             try:
-                parsed = json.loads(content)
-            except json.JSONDecodeError:
-                slog.error(module="OLLAMA", event="JSON_PARSE_ERROR", content=content)
+                parsed = json.loads(json_str)
+            except json.JSONDecodeError as err:
+                slog.error(module="OLLAMA", event="JSON_PARSE_ERROR", content=content or thinking)
                 return ActionObject(action_type="fail", reasoning="Failed to parse JSON from VLM")
 
             return ActionObject(
