@@ -206,6 +206,23 @@ export class AegisWebSocketClient {
     this.sessionId = null;
   }
 
+  public sendActionDenied(step_number: number, denied_action_type: string, risk_category: string, denial_source: 'user' | 'risk_engine_blocked'): void {
+    if (!this.sessionId) return;
+    const msg = {
+      type: 'action_denied',
+      session_id: this.sessionId,
+      timestamp: new Date().toISOString(),
+      protocol_version: '1.0',
+      payload: {
+        step_number,
+        denied_action_type,
+        risk_category,
+        denial_source,
+      },
+    };
+    this.send(msg);
+  }
+
   public ping(): void {
     if (!this.sessionId) return;
     const msg: PingMessage = {

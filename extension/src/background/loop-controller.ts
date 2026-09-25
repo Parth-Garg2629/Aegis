@@ -10,7 +10,9 @@ import type {
 } from '@aegis/protocol';
 import { slog } from '@aegis/shared';
 import { captureActiveTab } from './capture';
+import { ensureOffscreenDocument } from './offscreen-manager';
 import { AegisWebSocketClient } from './ws-client';
+import { scanGoal, validateAction, evaluateActionRisk } from '@aegis/core';
 import type {
   ExecuteActionRequestMessage,
   ExecuteActionResponseMessage,
@@ -34,6 +36,26 @@ export interface LoopControllerOptions {
   serverUrl?: string;
   maxSteps?: number;
   onStateChange?: (update: SessionStateUpdateMessage) => void;
+}
+
+async function sendMessageWithRetry<T = any>(message: any, maxRetries = 15, delayMs = 200): Promise<T> {
+  if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+    throw new Error('Chrome runtime not available');
+  }
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const response = await chrome.runtime.sendMessage(message);
+      if (response !== undefined) {
+        return response;
+      }
+    } catch (err: any) {
+      if (attempt === maxRetries - 1 || !err?.message?.includes('Receiving end does not exist')) {
+        throw err;
+      }
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error('Message sending timed out without response');
 }
 
 export class LoopController {
@@ -146,6 +168,7 @@ export class LoopController {
       await this.runLoop();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      console.error('[LOOP_START_FAILED ERROR]', err);
       slog.error({
         module: 'LOOP_CONTROLLER',
         event: 'LOOP_START_FAILED',
@@ -193,7 +216,6 @@ export class LoopController {
       const { schema: domSchema, domSignals, piiSignals } = await this.extractDomFromActiveTab();
 
       // D6 Goal Scanning
-      const { scanGoal } = await import('@aegis/core');
       const goalScan = scanGoal(this.goal);
       if (goalScan.hasSensitiveContent) {
           slog.warn({
@@ -211,6 +233,7 @@ export class LoopController {
       
       try {
         // Run Perception Cycle (Offscreen)
+        await ensureOffscreenDocument();
         const perceptionMsg = {
           type: 'RUN_PERCEPTION_CYCLE',
           screenshotDataUrl: captureResult.screenshotDataUrl,
@@ -219,7 +242,7 @@ export class LoopController {
           domSignals,
           piiSignals
         };
-        const perceptionResult = await chrome.runtime.sendMessage(perceptionMsg);
+        const perceptionResult = await sendMessageWithRetry(perceptionMsg);
         
         if (!perceptionResult) {
             throw new Error('Perception cycle returned null');
@@ -239,7 +262,7 @@ export class LoopController {
             previousActionResult: this.previousResult
           }
         };
-        const buildResult = await chrome.runtime.sendMessage(buildMsg);
+        const buildResult = await sendMessageWithRetry(buildMsg);
         
         if (!buildResult || !buildResult.success) {
             throw new Error(buildResult?.error || 'Build context failed');
@@ -285,6 +308,28 @@ export class LoopController {
         step_number: this.currentStep,
         action_type: action.action_type,
       });
+
+      const validation = validateAction(action);
+      if (!validation.valid) {
+        slog.error({ module: 'LOOP_CONTROLLER', event: 'ACTION_VALIDATION_FAILED', message: validation.error });
+        this.wsClient.sendActionResult({
+          step_number: this.currentStep,
+          action_type: action.action_type || 'unknown',
+          success: false,
+          error_code: 'E-VALIDATION',
+          error_message: validation.error
+        });
+        this.finish('agent_failed');
+        break;
+      }
+
+      const risk = evaluateActionRisk(action, domSchema);
+      if (risk.level === 'blocked' || risk.level === 'high_risk') {
+        slog.warn({ module: 'LOOP_CONTROLLER', event: 'ACTION_BLOCKED_BY_RISK_ENGINE', reason: risk.reason });
+        this.wsClient.sendActionDenied(this.currentStep, action.action_type, risk.matchedCategory || 'HR-UNKNOWN', 'risk_engine_blocked');
+        this.finish('agent_failed');
+        break;
+      }
 
       this.transition('executing', {
         lastAction: action.action_type,

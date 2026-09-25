@@ -7,3 +7,5 @@ export * from './dom-rules';
 export * from './schema-sanitizer';
 export * from './goal-scanner';
 export * from './iframe-policy';
+export * from './risk-engine';
+export * from './validation';

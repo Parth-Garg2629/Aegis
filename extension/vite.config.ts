@@ -1,7 +1,45 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import { resolve } from 'path';
-import { writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync } from 'fs';
+import { writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync, rmSync } from 'fs';
 import { generateManifest } from './manifest';
+
+function htmlRelocatePlugin(): Plugin {
+  return {
+    name: 'html-relocate',
+    generateBundle(_options, bundle) {
+      for (const [fileName, asset] of Object.entries(bundle)) {
+        if (fileName === 'src/ui/popup/popup.html' && asset) {
+          (asset as { fileName: string }).fileName = 'popup.html';
+        }
+        if (fileName === 'src/offscreen/offscreen.html' && asset) {
+          (asset as { fileName: string }).fileName = 'offscreen.html';
+        }
+      }
+    },
+    closeBundle() {
+      const distPopup = resolve(__dirname, 'dist/popup.html');
+      const srcPopup = resolve(__dirname, 'dist/src/ui/popup/popup.html');
+      if (!existsSync(distPopup) && existsSync(srcPopup)) {
+        copyFileSync(srcPopup, distPopup);
+      }
+
+      const distOffscreen = resolve(__dirname, 'dist/offscreen.html');
+      const srcOffscreen = resolve(__dirname, 'dist/src/offscreen/offscreen.html');
+      if (!existsSync(distOffscreen) && existsSync(srcOffscreen)) {
+        copyFileSync(srcOffscreen, distOffscreen);
+      }
+
+      const distSrc = resolve(__dirname, 'dist/src');
+      if (existsSync(distSrc)) {
+        try {
+          rmSync(distSrc, { recursive: true, force: true });
+        } catch {
+          // ignore
+        }
+      }
+    },
+  };
+}
 
 function manifestPlugin() {
   return {
@@ -72,7 +110,7 @@ function bundleMlAssetsPlugin() {
 }
 
 export default defineConfig({
-  plugins: [manifestPlugin(), bundleMlAssetsPlugin()],
+  plugins: [manifestPlugin(), htmlRelocatePlugin(), bundleMlAssetsPlugin()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

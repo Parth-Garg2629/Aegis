@@ -35,7 +35,6 @@ function toYoloLine(classId, box, imgW, imgH) {
   const h = box.h / imgH;
   return `${classId} ${cx.toFixed(6)} ${cy.toFixed(6)} ${w.toFixed(6)} ${h.toFixed(6)}`;
 }
-
 async function main() {
   const { variationsTrain, variationsVal, seedTag } = parseArgs();
   const outRoot = resolve(__dirname, 'dataset');

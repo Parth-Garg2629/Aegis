@@ -44,10 +44,19 @@ export type LogSink = (entry: Record<string, unknown>) => void;
 
 let currentSink: LogSink = (entry) => {
   const line = JSON.stringify(entry);
+  const nodeProcess = typeof process !== 'undefined' ? process : undefined;
   if (entry.level === 'error') {
-    process.stderr?.write ? process.stderr.write(line + '\n') : console.error(line);
+    if (typeof nodeProcess?.stderr?.write === 'function') {
+      nodeProcess.stderr.write(line + '\n');
+    } else {
+      console.error(line);
+    }
   } else {
-    process.stdout?.write ? process.stdout.write(line + '\n') : console.log(line);
+    if (typeof nodeProcess?.stdout?.write === 'function') {
+      nodeProcess.stdout.write(line + '\n');
+    } else {
+      console.log(line);
+    }
   }
 };
 

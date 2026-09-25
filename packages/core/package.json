@@ -8,7 +8,9 @@
     "build": "tsc -b",
     "test": "vitest run"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@aegis/protocol": "workspace:*"
+  },
   "devDependencies": {
     "fast-check": "^3.23.1",
     "typescript": "^5.7.2",

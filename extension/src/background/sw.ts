@@ -1,5 +1,6 @@
 import { slog } from '@aegis/shared';
 import { LoopController } from './loop-controller';
+import { ensureOffscreenDocument } from './offscreen-manager';
 import type { BusMessage, SessionStateUpdateMessage } from './bus';
 
 let loopController: LoopController | null = null;
@@ -34,11 +35,13 @@ chrome.runtime.onInstalled.addListener(() => {
     module: 'SERVICE_WORKER',
     event: 'EXTENSION_INSTALLED',
   });
+  ensureOffscreenDocument().catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message: BusMessage, _sender, sendResponse) => {
   switch (message.type) {
     case 'START_SESSION': {
+      ensureOffscreenDocument().catch(() => {});
       const controller = getOrCreateLoopController();
       controller
         .start(message.goal)

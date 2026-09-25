@@ -1,6 +1,11 @@
 import math
+import sys
 from pathlib import Path
 from dataclasses import dataclass
+
+# Ensure the ml/ directory is on the path so `model` can be found
+# regardless of working directory
+sys.path.insert(0, str(Path(__file__).parent))
 
 import numpy as np
 import torch
@@ -35,7 +40,7 @@ def letterbox_image(img: Image.Image, target_size: int) -> tuple[np.ndarray, Let
     scaled_h = round(h * params.scale)
 
     canvas = np.full((target_size, target_size, 3), LETTERBOX_PAD_VALUE, dtype=np.uint8)
-    resized = img.convert('RGB').resize((max(1, scaled_w), max(1, scaled_h)), Image.BILINEAR)
+    resized = img.convert('RGB').resize((max(1, scaled_w), max(1, scaled_h)), Image.Resampling.BILINEAR)
     resized_arr = np.asarray(resized)
     canvas[params.pad_top:params.pad_top + scaled_h, params.pad_left:params.pad_left + scaled_w] = resized_arr
     return canvas, params
@@ -56,8 +61,8 @@ class AegisDetectionDataset(Dataset):
     def __len__(self) -> int:
         return len(self.image_paths)
 
-    def __getitem__(self, idx: int):
-        img_path = self.image_paths[idx]
+    def __getitem__(self, index: int):
+        img_path = self.image_paths[index]
         label_path = self.label_dir / f'{img_path.stem}.txt'
 
         img = Image.open(img_path)

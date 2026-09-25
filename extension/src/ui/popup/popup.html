@@ -5,101 +5,416 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AEGIS Agent</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
     :root {
-      --bg: #0f172a;
-      --card: #1e293b;
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #38bdf8;
-      --danger: #ef4444;
-      --border: #334155;
+      --bg-deep:    #080c14;
+      --bg-surface: #0d1424;
+      --bg-card:    #111827;
+      --bg-hover:   #1a2236;
+      --border:     rgba(99,130,201,0.18);
+      --border-glow:rgba(56,189,248,0.35);
+      --accent:     #38bdf8;
+      --accent-dim: rgba(56,189,248,0.12);
+      --accent-glow:rgba(56,189,248,0.25);
+      --green:      #22c55e;
+      --red:        #ef4444;
+      --amber:      #f59e0b;
+      --text:       #f1f5f9;
+      --text-muted: #64748b;
+      --text-dim:   #94a3b8;
+      --pulse-1:    rgba(56,189,248,0.6);
+      --pulse-2:    rgba(56,189,248,0);
     }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      margin: 0;
-      padding: 16px;
       width: 360px;
-      background: var(--bg);
+      min-height: 480px;
+      background: var(--bg-deep);
       color: var(--text);
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 14px;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      overflow-x: hidden;
     }
-    h1 {
-      font-size: 16px;
-      font-weight: 600;
-      margin: 0 0 12px 0;
-      color: var(--accent);
+
+    /* ── Header ── */
+    .header {
       display: flex;
       align-items: center;
+      gap: 10px;
+      padding: 16px 18px 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(135deg, #0d1424 0%, #0a1220 100%);
+      position: relative;
+    }
+    .header::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 18px; right: 18px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent-glow), transparent);
+    }
+    .logo-ring {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      border: 1.5px solid var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      background: var(--accent-dim);
+      box-shadow: 0 0 12px var(--accent-glow), inset 0 0 8px var(--accent-dim);
+      flex-shrink: 0;
+    }
+    .logo-ring svg { width: 16px; height: 16px; }
+    .header-text h1 {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--text);
+      line-height: 1;
+    }
+    .header-text p {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 2px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .connection-dot {
+      margin-left: auto;
+      display: flex; align-items: center; gap: 5px;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .dot.online {
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.5; }
+    }
+
+    /* ── Status bar ── */
+    .status-bar {
+      margin: 14px 16px 0;
+      padding: 10px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
       gap: 8px;
     }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
+    .status-left { display: flex; align-items: center; gap: 8px; }
+    .status-icon-wrap {
+      width: 28px; height: 28px;
       border-radius: 8px;
-      padding: 12px;
-      margin-bottom: 12px;
+      background: var(--accent-dim);
+      border: 1px solid var(--border-glow);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
     }
-    textarea {
-      width: 100%;
-      box-sizing: border-box;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
+    .status-icon-wrap svg { width: 14px; height: 14px; color: var(--accent); }
+    .status-info p { font-size: 11px; color: var(--text-muted); }
+    .status-info strong {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
       color: var(--text);
-      padding: 8px;
+    }
+    #agent-status { color: var(--text-dim); transition: color 0.3s; }
+    #agent-status.running  { color: var(--accent); }
+    #agent-status.completed{ color: var(--green); }
+    #agent-status.failed, #agent-status.cancelled { color: var(--red); }
+
+    /* Step pill */
+    .step-pill {
+      display: flex; align-items: center; gap: 4px;
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 3px 10px;
+      font-size: 11px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    .step-pill svg { width: 11px; height: 11px; color: var(--accent); }
+
+    /* ── Progress bar ── */
+    .progress-wrap {
+      margin: 10px 16px 0;
+      height: 3px;
+      background: var(--bg-card);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+    .progress-track {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), #818cf8);
+      border-radius: 99px;
+      width: 0%;
+      transition: width 0.4s ease;
+    }
+
+    /* ── Goal section ── */
+    .section-label {
+      margin: 14px 16px 6px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+
+    .goal-wrap {
+      margin: 0 16px;
+      position: relative;
+    }
+    .goal-wrap textarea {
+      width: 100%;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text);
       font-family: inherit;
-      resize: vertical;
-      min-height: 60px;
+      font-size: 13px;
+      line-height: 1.5;
+      padding: 11px 12px;
+      resize: none;
+      min-height: 76px;
+      max-height: 120px;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
-    textarea:focus {
-      outline: 1px solid var(--accent);
+    .goal-wrap textarea::placeholder { color: var(--text-muted); }
+    .goal-wrap textarea:focus {
+      border-color: var(--border-glow);
+      box-shadow: 0 0 0 3px var(--accent-dim);
     }
-    .status-row {
+    .goal-wrap textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Actions ── */
+    .actions {
+      margin: 12px 16px 0;
+      display: flex;
+      gap: 8px;
+    }
+    .btn {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      height: 40px;
+      border: none;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s, background 0.2s;
+      user-select: none;
+    }
+    .btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+    .btn:active { transform: scale(0.97); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0ea5e9, #6366f1);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(14,165,233,0.3);
+    }
+    .btn-primary:not(:disabled):hover {
+      box-shadow: 0 6px 20px rgba(14,165,233,0.45);
+      transform: translateY(-1px);
+    }
+
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(239,68,68,0.25);
+    }
+    .btn-danger:not(:disabled):hover {
+      box-shadow: 0 6px 20px rgba(239,68,68,0.4);
+      transform: translateY(-1px);
+    }
+
+    /* ── Activity log ── */
+    .log-section {
+      margin: 14px 16px 0;
+    }
+    .log-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      min-height: 70px;
+      max-height: 100px;
+      overflow-y: auto;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .log-box::-webkit-scrollbar { width: 4px; }
+    .log-box::-webkit-scrollbar-track { background: transparent; }
+    .log-box::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 99px; }
+
+    .log-entry {
+      display: flex; align-items: flex-start; gap: 7px;
+      font-size: 11px;
+      line-height: 1.4;
+      animation: slide-in 0.2s ease;
+    }
+    @keyframes slide-in {
+      from { opacity: 0; transform: translateX(-6px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .log-time {
+      color: var(--text-muted);
+      font-size: 10px;
+      white-space: nowrap;
+      margin-top: 1px;
+      font-variant-numeric: tabular-nums;
+    }
+    .log-text { color: var(--text-dim); }
+    .log-text.action  { color: var(--accent); }
+    .log-text.success { color: var(--green); }
+    .log-text.error   { color: var(--red); }
+    .log-empty {
+      color: var(--text-muted);
+      font-size: 11px;
+      text-align: center;
+      margin: auto;
+      padding: 8px 0;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      margin: 12px 16px 16px;
       display: flex;
       justify-content: space-between;
+      align-items: center;
+    }
+    .footer-tag {
+      font-size: 10px;
       color: var(--text-muted);
-      font-size: 12px;
-      margin-top: 8px;
+      letter-spacing: 0.05em;
     }
-    .btn-row {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
+    .footer-ver {
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--bg-hover);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2px 8px;
     }
-    button {
-      flex: 1;
-      padding: 8px 12px;
-      border-radius: 6px;
-      font-weight: 500;
-      cursor: pointer;
-      border: none;
+
+    /* ── Scanning animation when running ── */
+    @keyframes scanline {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(400%);  }
     }
-    .btn-primary {
-      background: var(--accent);
-      color: #0f172a;
-    }
-    .btn-cancel {
-      background: var(--danger);
-      color: #fff;
+    .scanning .progress-track::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+      animation: scanline 1.8s linear infinite;
     }
   </style>
 </head>
 <body>
-  <h1>AEGIS Agent</h1>
-  <div class="card">
-    <label for="goal-input" style="display:block; margin-bottom: 6px; font-weight: 500;">Task Goal</label>
-    <textarea id="goal-input" placeholder="e.g. Complete my scholarship application..."></textarea>
-    <div class="btn-row">
-      <button id="start-btn" class="btn-primary">Start Agent</button>
-      <button id="cancel-btn" class="btn-cancel" disabled>Cancel</button>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="logo-ring">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+    </div>
+    <div class="header-text">
+      <h1>AEGIS</h1>
+      <p>Browser Agent</p>
+    </div>
+    <div class="connection-dot">
+      <div class="dot" id="conn-dot"></div>
+      <span id="conn-label">Offline</span>
     </div>
   </div>
-  <div class="card">
-    <div class="status-row">
-      <span>Status: <strong id="agent-status">Idle</strong></span>
-      <span id="step-counter">Step 0 / 30</span>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-left">
+      <div class="status-icon-wrap">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 8v4l2 2"/>
+        </svg>
+      </div>
+      <div class="status-info">
+        <p>Status</p>
+        <strong id="agent-status">Idle</strong>
+      </div>
+    </div>
+    <div class="step-pill">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+      </svg>
+      <span id="step-counter">0 / 30</span>
     </div>
   </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap">
+    <div class="progress-track" id="progress-track" style="width:0%"></div>
+  </div>
+
+  <!-- Goal input -->
+  <div class="section-label">Task Goal</div>
+  <div class="goal-wrap">
+    <textarea id="goal-input" placeholder="Describe what you want AEGIS to do…&#10;e.g. Search for computer science scholarships and click the first result." rows="3"></textarea>
+  </div>
+
+  <!-- Buttons -->
+  <div class="actions">
+    <button id="start-btn" class="btn btn-primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="5 3 19 12 5 21 5 3"/>
+      </svg>
+      Start Agent
+    </button>
+    <button id="cancel-btn" class="btn btn-danger" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="15" y1="9" x2="9" y2="15"/>
+        <line x1="9" y1="9" x2="15" y2="15"/>
+      </svg>
+      Stop
+    </button>
+  </div>
+
+  <!-- Activity log -->
+  <div class="log-section">
+    <div class="section-label" style="margin-top:12px; margin-bottom:6px; margin-left:0;">Activity</div>
+    <div class="log-box" id="log-box">
+      <p class="log-empty" id="log-empty">No activity yet.</p>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span class="footer-tag">AEGIS — Guarded Intelligent Surfing</span>
+    <span class="footer-ver">v1.0.0</span>
+  </div>
+
   <script type="module" src="./popup.ts"></script>
 </body>
 </html>

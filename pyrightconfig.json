@@ -1,0 +1,9 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonPath": ".venv/Scripts/python.exe",
+  "include": ["server", "ml"],
+  "exclude": [".venv", "node_modules", "extension/dist"],
+  "extraPaths": ["server", "ml"],
+  "reportMissingModuleSource": "none"
+}
