@@ -14,13 +14,10 @@ import { ensureOffscreenDocument } from './offscreen-manager';
 import { AegisWebSocketClient } from './ws-client';
 import { scanGoal, validateAction, evaluateActionRisk } from '@aegis/core';
 import type {
-  DetailedState,
   ExecuteActionRequestMessage,
   ExecuteActionResponseMessage,
   ExtractDomRequestMessage,
   ExtractDomResponseMessage,
-  PendingConfirmation,
-  ProviderInfo,
   SessionStateUpdateMessage,
 } from './bus';
 
@@ -30,8 +27,8 @@ export type LoopState =
   | 'capturing'
   | 'sanitizing'
   | 'awaiting_action'
-  | 'awaiting_confirmation'
   | 'executing'
+  | 'confirming'       // ← NEW: paused waiting for user approve/deny
   | 'completed'
   | 'failed'
   | 'cancelled';
@@ -40,6 +37,13 @@ export interface LoopControllerOptions {
   serverUrl?: string;
   maxSteps?: number;
   onStateChange?: (update: SessionStateUpdateMessage) => void;
+}
+
+// Metadata sent to popup during confirming state — privacy-safe only
+export interface ConfirmationMeta {
+  actionType: string;
+  target: string | null;
+  riskReason: string;
 }
 
 async function sendMessageWithRetry<T = any>(message: any, maxRetries = 15, delayMs = 200): Promise<T> {
@@ -75,13 +79,8 @@ export class LoopController {
   private pendingActionResolver: ((action: ActionObject) => void) | null = null;
   private pendingSessionResolver: ((session: SessionCreatedMessage) => void) | null = null;
 
-  // Confirmation flow
-  private pendingConfirmationAction: ActionObject | null = null;
-  private pendingConfirmationRisk: { category: string; reason: string } | null = null;
-  private confirmationResolver: ((approved: boolean) => void) | null = null;
-
-  // Provider info from server
-  private providerInfo: ProviderInfo | null = null;
+  // Confirmation flow: resolve = user responded (true=approved, false=denied)
+  private pendingConfirmResolver: ((approved: boolean) => void) | null = null;
 
   constructor(options: LoopControllerOptions = {}) {
     this.maxSteps = options.maxSteps || 30;
@@ -90,32 +89,12 @@ export class LoopController {
 
     this.wsClient.setCallbacks({
       onSessionCreated: (msg) => {
-        // Extract provider info from session_created if available
-        const payload = msg.payload as any;
-        if (payload.provider_name) {
-          this.providerInfo = {
-            providerName: payload.provider_name,
-            modelName: payload.model_name,
-            isMock: payload.is_mock === true,
-          };
-        }
-
         if (this.pendingSessionResolver) {
           this.pendingSessionResolver(msg);
           this.pendingSessionResolver = null;
         }
       },
       onAction: (msg: ActionMessage) => {
-        // Extract provider info from action response if available
-        const payload = msg.payload as any;
-        if (payload.provider_name) {
-          this.providerInfo = {
-            providerName: payload.provider_name,
-            modelName: payload.model_name,
-            isMock: payload.is_mock === true,
-          };
-        }
-
         if (this.pendingActionResolver) {
           this.pendingActionResolver(msg.payload.action);
           this.pendingActionResolver = null;
@@ -153,20 +132,28 @@ export class LoopController {
     return this.wsClient.getSessionId();
   }
 
-  /** Called when the user approves a high-risk action. */
-  public confirmAction(): void {
-    if (this.confirmationResolver) {
-      this.confirmationResolver(true);
-      this.confirmationResolver = null;
+  /**
+   * Called by sw.ts when the popup sends CONFIRM_ACTION (approved=true/false).
+   * Safe to call in any state; only acts during 'confirming'.
+   */
+  public handleConfirmation(approved: boolean): void {
+    slog.info({
+      module: 'LOOP_CONTROLLER',
+      event: 'CONFIRMATION_RECEIVED',
+      approved,
+      step: this.currentStep,
+    });
+    if (this.state !== 'confirming' || !this.pendingConfirmResolver) {
+      slog.warn({
+        module: 'LOOP_CONTROLLER',
+        event: 'CONFIRMATION_IGNORED',
+        reason: 'Not in confirming state or no resolver pending',
+      });
+      return;
     }
-  }
-
-  /** Called when the user denies a high-risk action. */
-  public denyAction(): void {
-    if (this.confirmationResolver) {
-      this.confirmationResolver(false);
-      this.confirmationResolver = null;
-    }
+    const resolve = this.pendingConfirmResolver;
+    this.pendingConfirmResolver = null;
+    resolve(approved);
   }
 
   public async start(goal: string, targetTabId?: number): Promise<void> {
@@ -177,10 +164,6 @@ export class LoopController {
     this.goal = goal;
     this.currentStep = 0;
     this.previousResult = null;
-    this.pendingConfirmationAction = null;
-    this.pendingConfirmationRisk = null;
-    this.confirmationResolver = null;
-    this.providerInfo = null;
     this.transition('starting');
 
     if (targetTabId) {
@@ -239,10 +222,11 @@ export class LoopController {
       step: this.currentStep,
     });
 
-    // Reject any pending confirmation
-    if (this.confirmationResolver) {
-      this.confirmationResolver(false);
-      this.confirmationResolver = null;
+    // If paused in confirming, resolve as denied so the loop exits cleanly
+    if (this.pendingConfirmResolver) {
+      const resolve = this.pendingConfirmResolver;
+      this.pendingConfirmResolver = null;
+      resolve(false);
     }
 
     this.wsClient.sendSessionEnd('user_cancelled', this.currentStep);
@@ -250,7 +234,7 @@ export class LoopController {
     this.transition('cancelled');
   }
 
-    private async runLoop(): Promise<void> {
+  private async runLoop(): Promise<void> {
     while (this.state !== 'completed' && this.state !== 'failed' && this.state !== 'cancelled') {
       if (this.currentStep > this.maxSteps) {
         slog.info({
@@ -332,10 +316,8 @@ export class LoopController {
            event: 'OFFSCREEN_PIPELINE_FAILED',
            message: err instanceof Error ? err.message : String(err)
         });
-        
-        // Fail closed: sanitization failure prevents transmission
         slog.error({ module: 'LOOP_CONTROLLER', event: 'FAIL_CLOSED', message: 'Sanitization failed. Cannot send data.' });
-        this.transition('failed', { error: 'Sanitization failed — data not transmitted' });
+        this.transition('failed', { error: 'Sanitization failed' });
         break;
       }
 
@@ -347,19 +329,11 @@ export class LoopController {
             this.pendingActionResolver = null;
             reject(new Error('Timed out waiting for agent action'));
           }
-        }, 120000);
+        }, 30000);
       });
 
       this.wsClient.sendContextUpdate(sanitizedPayload);
-      let action: ActionObject;
-      try {
-        action = await actionPromise;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        slog.error({ module: 'LOOP_CONTROLLER', event: 'ACTION_WAIT_FAILED', message });
-        this.transition('failed', { error: message });
-        break;
-      }
+      const action = await actionPromise;
 
       slog.info({
         module: 'LOOP_CONTROLLER',
@@ -368,7 +342,7 @@ export class LoopController {
         action_type: action.action_type,
       });
 
-      // Validate action
+      // ── Client-side validation ─────────────────────────────────────────────
       const validation = validateAction(action);
       if (!validation.valid) {
         slog.error({ module: 'LOOP_CONTROLLER', event: 'ACTION_VALIDATION_FAILED', message: validation.error });
@@ -383,68 +357,104 @@ export class LoopController {
         break;
       }
 
-      // Risk assessment
+      // ── Client-side risk evaluation ────────────────────────────────────────
       const risk = evaluateActionRisk(action, domSchema);
 
-      // BLOCKED → never execute
       if (risk.level === 'blocked') {
-        slog.warn({ module: 'LOOP_CONTROLLER', event: 'ACTION_BLOCKED_BY_RISK_ENGINE', reason: risk.reason });
-        this.wsClient.sendActionDenied(this.currentStep, action.action_type, risk.matchedCategory || 'HR-UNKNOWN', 'risk_engine_blocked');
-        this.transition('failed', {
-          error: `Action blocked: ${risk.reason}`,
-          lastAction: action.action_type,
+        // BLOCKED: fail closed immediately — no confirmation, no execution
+        slog.warn({
+          module: 'LOOP_CONTROLLER',
+          event: 'ACTION_BLOCKED',
+          reason: risk.reason,
+          category: risk.matchedCategory,
         });
+        this.wsClient.sendActionDenied(
+          this.currentStep,
+          action.action_type,
+          risk.matchedCategory || 'BLOCKED',
+          'risk_engine_blocked',
+        );
         this.finish('agent_failed');
         break;
       }
 
-      // HIGH-RISK → ask user for confirmation
       if (risk.level === 'high_risk') {
-        slog.info({
+        // HIGH_RISK: pause, request user confirmation
+        slog.warn({
           module: 'LOOP_CONTROLLER',
-          event: 'ACTION_REQUIRES_CONFIRMATION',
-          action_type: action.action_type,
-          risk_category: risk.matchedCategory,
+          event: 'ACTION_HIGH_RISK_PENDING_CONFIRMATION',
+          reason: risk.reason,
+          category: risk.matchedCategory,
         });
 
-        this.pendingConfirmationAction = action;
-        this.pendingConfirmationRisk = {
-          category: risk.matchedCategory || 'HR-UNKNOWN',
-          reason: risk.reason || 'High-risk action detected',
-        };
-
-        this.transition('awaiting_confirmation', {
+        // Transition to confirming — popup will show Approve/Deny UI
+        this.transition('confirming', {
           lastAction: action.action_type,
-          reasoning: action.reasoning || undefined,
+          confirmMeta: {
+            actionType: action.action_type,
+            target: action.target ?? null,
+            riskReason: risk.reason ?? risk.matchedCategory ?? 'High-risk action',
+          },
         });
 
-        // Wait for user decision
+        // Await user decision (popup sends CONFIRM_ACTION → sw.ts → handleConfirmation)
         const approved = await new Promise<boolean>((resolve) => {
-          this.confirmationResolver = resolve;
-          // Safety timeout: auto-deny after 60 seconds
-          setTimeout(() => {
-            if (this.confirmationResolver) {
-              slog.warn({ module: 'LOOP_CONTROLLER', event: 'CONFIRMATION_TIMEOUT', step: this.currentStep });
-              this.confirmationResolver = null;
-              resolve(false);
-            }
-          }, 60000);
+          this.pendingConfirmResolver = resolve;
         });
 
-        this.pendingConfirmationAction = null;
-        this.pendingConfirmationRisk = null;
 
         if (!approved) {
-          slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_DENIED_BY_USER', step: this.currentStep });
-          this.wsClient.sendActionDenied(this.currentStep, action.action_type, risk.matchedCategory || 'HR-UNKNOWN', 'user');
+          // DENY: do not execute, report denied, end session
+          slog.info({
+            module: 'LOOP_CONTROLLER',
+            event: 'CONFIRMATION_DENIED',
+            step: this.currentStep,
+          });
+          this.wsClient.sendActionDenied(
+            this.currentStep,
+            action.action_type,
+            risk.matchedCategory || 'HR-DENIED',
+            'user_denied',
+          );
           this.finish('agent_failed');
           break;
         }
 
-        slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_APPROVED_BY_USER', step: this.currentStep });
+        // APPROVE: perform live-DOM validation before execution
+        slog.info({
+          module: 'LOOP_CONTROLLER',
+          event: 'CONFIRMATION_APPROVED_LIVE_DOM_CHECK',
+          step: this.currentStep,
+        });
+
+        const liveValidation = await this.performLiveDomValidation(action, domSchema);
+        if (!liveValidation.valid) {
+          slog.warn({
+            module: 'LOOP_CONTROLLER',
+            event: 'LIVE_DOM_VALIDATION_FAILED',
+            reason: liveValidation.reason,
+            step: this.currentStep,
+          });
+          this.wsClient.sendActionResult({
+            step_number: this.currentStep,
+            action_type: action.action_type,
+            success: false,
+            error_code: 'E-STALE-TARGET',
+            error_message: liveValidation.reason,
+          });
+          this.finish('agent_failed');
+          break;
+        }
+
+        slog.info({
+          module: 'LOOP_CONTROLLER',
+          event: 'LIVE_DOM_VALIDATION_PASSED',
+          step: this.currentStep,
+        });
+        // Fall through to execution below
       }
 
-      // Execute the action
+      // ── Terminal actions (done / fail) ─────────────────────────────────────
       this.transition('executing', {
         lastAction: action.action_type,
         reasoning: action.reasoning || undefined,
@@ -473,6 +483,7 @@ export class LoopController {
         break;
       }
 
+      // ── Execute ────────────────────────────────────────────────────────────
       const executionResult = await this.executeActionInActiveTab(action);
       this.previousResult = executionResult;
 
@@ -487,6 +498,60 @@ export class LoopController {
 
       this.currentStep++;
     }
+  }
+
+  /**
+   * Live-DOM validation: re-query the active tab's current DOM to confirm
+   * the target still exists, is visible, and is interactive before executing
+   * a high-risk action the user just approved.
+   *
+   * Returns { valid: true } or { valid: false, reason: string }.
+   */
+  private async performLiveDomValidation(
+    action: ActionObject,
+    originalSchema: SanitizedSchema,
+  ): Promise<{ valid: boolean; reason: string }> {
+    const targetId = action.target;
+
+    // Actions without a specific target (wait, scroll without target) are always valid
+    if (!targetId) {
+      return { valid: true, reason: '' };
+    }
+
+    // Re-extract live DOM
+    let liveSchema: SanitizedSchema;
+    try {
+      const { schema } = await this.extractDomFromActiveTab();
+      liveSchema = schema;
+    } catch {
+      return { valid: false, reason: 'Could not re-extract live DOM for validation' };
+    }
+
+    // 1. Target must still exist in current DOM
+    const liveEl = liveSchema.elements.find((el) => el.id === targetId);
+    if (!liveEl) {
+      return { valid: false, reason: `Target element "${targetId}" no longer exists in live DOM (stale target)` };
+    }
+
+    // 2. Target must still be visible
+    if (liveEl.isVisible === false) {
+      return { valid: false, reason: `Target element "${targetId}" is no longer visible` };
+    }
+
+    // 3. Target must not be disabled
+    if (liveEl.isDisabled === true) {
+      return { valid: false, reason: `Target element "${targetId}" is disabled` };
+    }
+
+    // 4. Page URL must not have changed (prevents cross-page execution)
+    if (originalSchema.url && liveSchema.url && originalSchema.url !== liveSchema.url) {
+      return {
+        valid: false,
+        reason: `Page URL changed since action was proposed (was: ${originalSchema.url}, now: ${liveSchema.url})`,
+      };
+    }
+
+    return { valid: true, reason: '' };
   }
 
   private async extractDomFromActiveTab(): Promise<{ schema: SanitizedSchema; domSignals: any[]; piiSignals: any[] }> {
@@ -565,65 +630,35 @@ export class LoopController {
     if (reason === 'goal_achieved') {
       this.transition('completed');
     } else {
-      this.transition('failed', { error: `Terminated: ${reason}` });
-    }
-  }
-
-  private mapToDetailedState(loopState: LoopState): DetailedState {
-    switch (loopState) {
-      case 'idle': return 'idle';
-      case 'starting': return 'starting';
-      case 'capturing': return 'capturing';
-      case 'sanitizing': return 'sanitizing';
-      case 'awaiting_action': return 'awaiting_action';
-      case 'awaiting_confirmation': return 'awaiting_confirmation';
-      case 'executing': return 'executing';
-      case 'completed': return 'completed';
-      case 'failed': return 'failed';
-      case 'cancelled': return 'cancelled';
-      default: return 'idle';
-    }
-  }
-
-  private mapToHighLevelState(loopState: LoopState): 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' {
-    switch (loopState) {
-      case 'idle': return 'idle';
-      case 'completed': return 'completed';
-      case 'failed': return 'failed';
-      case 'cancelled': return 'cancelled';
-      case 'awaiting_confirmation': return 'paused';
-      default: return 'running';
+      this.transition('failed', { error: `Terminated with reason: ${reason}` });
     }
   }
 
   private transition(
     newState: LoopState,
-    meta: { lastAction?: string; reasoning?: string; error?: string } = {},
+    meta: { lastAction?: string; reasoning?: string; error?: string; confirmMeta?: ConfirmationMeta } = {},
   ): void {
     this.state = newState;
-
-    let pendingConfirmation: PendingConfirmation | null = null;
-    if (newState === 'awaiting_confirmation' && this.pendingConfirmationAction && this.pendingConfirmationRisk) {
-      pendingConfirmation = {
-        actionType: this.pendingConfirmationAction.action_type,
-        target: this.pendingConfirmationAction.target,
-        reasoning: this.pendingConfirmationAction.reasoning,
-        riskCategory: this.pendingConfirmationRisk.category,
-        riskReason: this.pendingConfirmationRisk.reason,
-      };
-    }
-
     const update: SessionStateUpdateMessage = {
       type: 'SESSION_STATE_UPDATE',
-      state: this.mapToHighLevelState(newState),
-      detailedState: this.mapToDetailedState(newState),
+      state:
+        newState === 'completed'
+          ? 'completed'
+          : newState === 'failed'
+            ? 'failed'
+            : newState === 'cancelled'
+              ? 'cancelled'
+              : newState === 'idle'
+                ? 'idle'
+                : newState === 'confirming'
+                  ? 'confirming'
+                  : 'running',
       step: this.currentStep,
       maxSteps: this.maxSteps,
       lastAction: meta.lastAction,
       reasoning: meta.reasoning,
       error: meta.error,
-      pendingConfirmation,
-      providerInfo: this.providerInfo,
+      confirmMeta: meta.confirmMeta,
     };
 
     this.onStateChange?.(update);

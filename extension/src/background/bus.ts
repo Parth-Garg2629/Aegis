@@ -5,12 +5,11 @@ export type BusMessageType =
   | 'CANCEL_SESSION'
   | 'GET_SESSION_STATE'
   | 'SESSION_STATE_UPDATE'
-  | 'CONFIRM_ACTION'
-  | 'DENY_ACTION'
   | 'EXTRACT_DOM_REQUEST'
   | 'EXTRACT_DOM_RESPONSE'
   | 'EXECUTE_ACTION_REQUEST'
-  | 'EXECUTE_ACTION_RESPONSE';
+  | 'EXECUTE_ACTION_RESPONSE'
+  | 'CONFIRM_ACTION';
 
 export interface StartSessionMessage {
   type: 'START_SESSION';
@@ -25,60 +24,20 @@ export interface GetSessionStateMessage {
   type: 'GET_SESSION_STATE';
 }
 
-/** Detailed state visible to the popup for fine-grained UX feedback. */
-export type DetailedState =
-  | 'idle'
-  | 'connecting'
-  | 'starting'
-  | 'capturing'
-  | 'analyzing'
-  | 'sanitizing'
-  | 'awaiting_action'
-  | 'awaiting_confirmation'
-  | 'executing'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'reconnecting'
-  | 'blocked';
-
-/** Information about a pending high-risk action awaiting user confirmation. */
-export interface PendingConfirmation {
-  actionType: string;
-  target?: string | null;
-  reasoning?: string | null;
-  riskCategory: string;
-  riskReason: string;
-}
-
-/** Provider status information for transparency. */
-export interface ProviderInfo {
-  providerName?: string;
-  modelName?: string;
-  isMock?: boolean;
-}
-
 export interface SessionStateUpdateMessage {
   type: 'SESSION_STATE_UPDATE';
-  state: 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
-  detailedState: DetailedState;
+  state: 'idle' | 'running' | 'paused' | 'confirming' | 'completed' | 'failed' | 'cancelled';
   step: number;
   maxSteps: number;
   lastAction?: string;
   reasoning?: string;
   error?: string;
-  pendingConfirmation?: PendingConfirmation | null;
-  providerInfo?: ProviderInfo | null;
-}
-
-/** User approves a pending high-risk action. */
-export interface ConfirmActionMessage {
-  type: 'CONFIRM_ACTION';
-}
-
-/** User denies a pending high-risk action. */
-export interface DenyActionMessage {
-  type: 'DENY_ACTION';
+  /** Privacy-safe metadata shown in the confirmation UI — never contains raw values */
+  confirmMeta?: {
+    actionType: string;
+    target: string | null;
+    riskReason: string;
+  };
 }
 
 export interface ExtractDomRequestMessage {
@@ -89,8 +48,8 @@ export interface ExtractDomResponseMessage {
   type: 'EXTRACT_DOM_RESPONSE';
   schema: SanitizedSchema;
   elementsCount: number;
-  domSignals: any[];
-  piiSignals: any[];
+  domSignals: any[]; // Changed from any to any[]
+  piiSignals: any[]; // Changed from any to any[]
 }
 
 export interface ExecuteActionRequestMessage {
@@ -109,9 +68,13 @@ export type BusMessage =
   | CancelSessionMessage
   | GetSessionStateMessage
   | SessionStateUpdateMessage
-  | ConfirmActionMessage
-  | DenyActionMessage
   | ExtractDomRequestMessage
   | ExtractDomResponseMessage
   | ExecuteActionRequestMessage
-  | ExecuteActionResponseMessage;
+  | ExecuteActionResponseMessage
+  | ConfirmActionMessage;
+
+export interface ConfirmActionMessage {
+  type: 'CONFIRM_ACTION';
+  approved: boolean;
+}
