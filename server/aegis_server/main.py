@@ -13,12 +13,14 @@ from fastapi import FastAPI, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from aegis_server.ws_gateway import handle_websocket_connection
+from aegis_server.view import router as view_router
 
 app = FastAPI(
     title="AEGIS Server",
     description="Agentic Engine for Guarded Intelligent Surfing — Backend & Gateway",
     version="1.0.0",
 )
+app.include_router(view_router)
 
 # Localhost-only CORS for demo (ADR-11)
 app.add_middleware(

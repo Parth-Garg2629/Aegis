@@ -34,6 +34,8 @@ class AgentOrchestrator:
         try:
             # 1. Validation (Verify context has sanitized schema and screenshot unless step 1)
             # Handled by E5, but basic checks can go here if needed.
+            if session.current_step > session.max_steps:
+                return ActionObject(action_type="fail", reasoning="Maximum steps reached"), None
 
             # 2. Call VLM
             action = self.provider.generate_action(

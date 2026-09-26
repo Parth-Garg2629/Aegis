@@ -329,6 +329,129 @@
       background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
       animation: scanline 1.8s linear infinite;
     }
+
+    /* ── Confirmation overlay ── */
+    .confirm-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 100;
+      background: rgba(8, 12, 20, 0.92);
+      backdrop-filter: blur(4px);
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px 18px;
+      gap: 14px;
+      animation: overlay-in 0.2s ease;
+    }
+    .confirm-overlay.active { display: flex; }
+    @keyframes overlay-in {
+      from { opacity: 0; transform: scale(0.97); }
+      to   { opacity: 1; transform: scale(1); }
+    }
+    .confirm-card {
+      width: 100%;
+      background: var(--bg-card);
+      border: 1.5px solid rgba(245,158,11,0.5);
+      border-radius: 14px;
+      padding: 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 0 24px rgba(245,158,11,0.12);
+    }
+    .confirm-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .confirm-icon {
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: rgba(245,158,11,0.15);
+      border: 1.5px solid rgba(245,158,11,0.5);
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .confirm-icon svg { width: 16px; height: 16px; color: var(--amber); }
+    .confirm-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--amber);
+      letter-spacing: 0.01em;
+    }
+    .confirm-subtitle {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+    .confirm-rows {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .confirm-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .confirm-row-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-muted);
+      min-width: 52px;
+      padding-top: 1px;
+    }
+    .confirm-row-value {
+      font-size: 12px;
+      color: var(--text);
+      font-weight: 500;
+      word-break: break-all;
+    }
+    .confirm-row-value.risk {
+      color: var(--amber);
+    }
+    .confirm-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .btn-approve {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      height: 38px;
+      border: none;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+      background: linear-gradient(135deg, #16a34a, #15803d);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(22,163,74,0.3);
+    }
+    .btn-approve:hover { box-shadow: 0 6px 20px rgba(22,163,74,0.45); transform: translateY(-1px); }
+    .btn-approve:active { transform: scale(0.97); }
+    .btn-deny {
+      flex: 1;
+      display: flex; align-items: center; justify-content: center; gap: 6px;
+      height: 38px;
+      border: none;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(239,68,68,0.25);
+    }
+    .btn-deny:hover { box-shadow: 0 6px 20px rgba(239,68,68,0.4); transform: translateY(-1px); }
+    .btn-deny:active { transform: scale(0.97); }
   </style>
 </head>
 <body>
@@ -416,5 +539,58 @@
   </div>
 
   <script type="module" src="./popup.ts"></script>
+
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Confirmation overlay — shown only when risk=high_risk and the loop
+       is paused waiting for user Approve / Deny.
+       Privacy: displays only action type, element ID, and risk reason.
+       Does NOT display passwords, raw DOM, screenshots, or VLM reasoning.
+  ──────────────────────────────────────────────────────────────────────── -->
+  <div class="confirm-overlay" id="confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="confirm-title-text">
+    <div class="confirm-card">
+      <div class="confirm-header">
+        <div class="confirm-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <div>
+          <div class="confirm-title" id="confirm-title-text">Action Requires Confirmation</div>
+          <div class="confirm-subtitle">Review this high-risk action before proceeding</div>
+        </div>
+      </div>
+
+      <div class="confirm-rows">
+        <div class="confirm-row">
+          <span class="confirm-row-label">Action</span>
+          <span class="confirm-row-value" id="confirm-action-type">—</span>
+        </div>
+        <div class="confirm-row">
+          <span class="confirm-row-label">Target</span>
+          <span class="confirm-row-value" id="confirm-target">—</span>
+        </div>
+        <div class="confirm-row">
+          <span class="confirm-row-label">Risk</span>
+          <span class="confirm-row-value risk" id="confirm-risk-reason">High Risk</span>
+        </div>
+      </div>
+
+      <div class="confirm-actions">
+        <button id="approve-btn" class="btn-approve">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Approve
+        </button>
+        <button id="deny-btn" class="btn-deny">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+          Deny
+        </button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

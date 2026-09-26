@@ -8,7 +8,8 @@ export type BusMessageType =
   | 'EXTRACT_DOM_REQUEST'
   | 'EXTRACT_DOM_RESPONSE'
   | 'EXECUTE_ACTION_REQUEST'
-  | 'EXECUTE_ACTION_RESPONSE';
+  | 'EXECUTE_ACTION_RESPONSE'
+  | 'CONFIRM_ACTION';
 
 export interface StartSessionMessage {
   type: 'START_SESSION';
@@ -25,12 +26,18 @@ export interface GetSessionStateMessage {
 
 export interface SessionStateUpdateMessage {
   type: 'SESSION_STATE_UPDATE';
-  state: 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+  state: 'idle' | 'running' | 'paused' | 'confirming' | 'completed' | 'failed' | 'cancelled';
   step: number;
   maxSteps: number;
   lastAction?: string;
   reasoning?: string;
   error?: string;
+  /** Privacy-safe metadata shown in the confirmation UI — never contains raw values */
+  confirmMeta?: {
+    actionType: string;
+    target: string | null;
+    riskReason: string;
+  };
 }
 
 export interface ExtractDomRequestMessage {
@@ -64,4 +71,10 @@ export type BusMessage =
   | ExtractDomRequestMessage
   | ExtractDomResponseMessage
   | ExecuteActionRequestMessage
-  | ExecuteActionResponseMessage;
+  | ExecuteActionResponseMessage
+  | ConfirmActionMessage;
+
+export interface ConfirmActionMessage {
+  type: 'CONFIRM_ACTION';
+  approved: boolean;
+}
