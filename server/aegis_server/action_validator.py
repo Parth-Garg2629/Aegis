@@ -64,7 +64,7 @@ class ActionValidator:
 
         # 4. Value safety check (script injection)
         if action.value is not None:
-            val_str = str(action.value).lower()
+            val_str = action.value.lower()
             for pattern in self.BLOCKED_PATTERNS:
                 if re.search(pattern, val_str):
                     return ValidationResult(False, "E-VAL-06", "Script injection pattern detected in value")

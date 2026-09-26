@@ -8,7 +8,7 @@ import sqlite3
 import os
 import json
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 class AuditDB:
     def __init__(self, db_path: str = "data/aegis_audit.db", enabled: bool = False):
@@ -217,7 +217,7 @@ class AuditDB:
 
     def cleanup_old_records(self, days: int = 7):
         if not self.enabled: return
-        cutoff_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         with self._get_conn() as conn:
             # Due to ON DELETE CASCADE, deleting from audit_sessions deletes related rows
             conn.execute("DELETE FROM audit_sessions WHERE start_time < ?", (cutoff_date,))

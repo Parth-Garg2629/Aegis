@@ -25,7 +25,7 @@ class BaseEnvelope(BaseModel):
     session_id: Optional[str] = None
     timestamp: str
     protocol_version: Literal["1.0"] = "1.0"
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: Any = Field(default_factory=dict)
 
 
 class ClientMetadata(BaseModel):

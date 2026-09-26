@@ -1,7 +1,7 @@
 import pytest
 import os
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from aegis_server.audit_db import AuditDB
 
 @pytest.fixture
@@ -129,13 +129,13 @@ def test_audit_security_event(temp_db_path):
 def test_audit_retention_cleanup(temp_db_path):
     db = AuditDB(db_path=temp_db_path, enabled=True)
     old_session = "sess-old"
-    old_date = (datetime.utcnow() - timedelta(days=10)).isoformat()
+    old_date = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
     db.record_session_start(old_session, "1.0", {}, old_date)
     
     db.record_action(old_session, 1, "done", None, None, "NON_SENSITIVE", None, None, "SAFE", False, None, "SUCCESS", None, old_date)
     
     new_session = "sess-new"
-    new_date = datetime.utcnow().isoformat()
+    new_date = datetime.now(timezone.utc).isoformat()
     db.record_session_start(new_session, "1.0", {}, new_date)
     
     db.cleanup_old_records(days=7)

@@ -8,6 +8,7 @@
     { "path": "./packages/protocol" },
     { "path": "./packages/shared" },
     { "path": "./packages/core" },
-    { "path": "./extension" }
+    { "path": "./extension" },
+    { "path": "./tests" }
   ]
 }

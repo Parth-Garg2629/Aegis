@@ -51,7 +51,7 @@ def export(checkpoint_path: str, output_path: str) -> None:
 
     meta = {
         'input_shape': [1, 3, ckpt['input_size'], ckpt['input_size']],
-        'output_shape': list(onnx_out.shape),
+        'output_shape': list(np.array(onnx_out).shape),
         'class_names': ckpt['class_names'],
         'grid_size': ckpt['grid_size'],
         'max_diff_torch_vs_ort': float(max_diff),
