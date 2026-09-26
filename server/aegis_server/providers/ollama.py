@@ -12,9 +12,9 @@ E3 Hardening:
 import json
 import os
 import httpx
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, cast
 
-from aegis_server.protocol import ActionObject, ContextUpdatePayload
+from aegis_server.protocol import ActionObject, ActionType, ContextUpdatePayload
 from aegis_server.providers.base import VLMProvider
 from aegis_server.session import ActionHistoryItem
 from aegis_server.slog import slog
@@ -88,7 +88,7 @@ class OllamaProvider(VLMProvider):
                 return s if s else None
 
             action = ActionObject(
-                action_type=action_type,
+                action_type=cast(ActionType, action_type),
                 target=norm_str(parsed.get("target")),
                 value=norm_str(parsed.get("value")),
                 reasoning=norm_str(parsed.get("reasoning")) or ""

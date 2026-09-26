@@ -27,7 +27,7 @@ const FIXTURE_PORT = 8766;
 
 test.beforeAll(async () => {
   await new Promise<void>((resolvePromise) => {
-    staticServer = createServer((req, res) => {
+    staticServer = createServer((_req, res) => {
       const filePath = resolve(__dirname, '../../fixtures/fp_01.html');
       if (existsSync(filePath)) {
         const content = readFileSync(filePath, 'utf-8');

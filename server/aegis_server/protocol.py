@@ -41,9 +41,9 @@ class SessionInitPayload(BaseModel):
 
 
 class SessionInitMessage(BaseEnvelope):
-    type: Literal["session_init"] = "session_init"
+    type: Literal["session_init"] = "session_init"  # type: ignore[override]
     session_id: Optional[str] = None
-    payload: SessionInitPayload
+    payload: SessionInitPayload  # type: ignore[override]
 
 
 class SessionCreatedPayload(BaseModel):
@@ -51,9 +51,9 @@ class SessionCreatedPayload(BaseModel):
 
 
 class SessionCreatedMessage(BaseEnvelope):
-    type: Literal["session_created"] = "session_created"
-    session_id: str
-    payload: SessionCreatedPayload
+    type: Literal["session_created"] = "session_created"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: SessionCreatedPayload  # type: ignore[override]
 
 
 class BoundingBox(BaseModel):
@@ -113,9 +113,9 @@ class ContextUpdatePayload(BaseModel):
 
 
 class ContextUpdateMessage(BaseEnvelope):
-    type: Literal["context_update"] = "context_update"
-    session_id: str
-    payload: ContextUpdatePayload
+    type: Literal["context_update"] = "context_update"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: ContextUpdatePayload  # type: ignore[override]
 
 
 ActionType = Literal["click", "type", "scroll", "select", "hover", "wait", "done", "fail"]
@@ -141,9 +141,9 @@ class ActionPayload(BaseModel):
 
 
 class ActionMessage(BaseEnvelope):
-    type: Literal["action"] = "action"
-    session_id: str
-    payload: ActionPayload
+    type: Literal["action"] = "action"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: ActionPayload  # type: ignore[override]
 
 
 class ActionResultPayload(BaseModel):
@@ -156,9 +156,9 @@ class ActionResultPayload(BaseModel):
 
 
 class ActionResultMessage(BaseEnvelope):
-    type: Literal["action_result"] = "action_result"
-    session_id: str
-    payload: ActionResultPayload
+    type: Literal["action_result"] = "action_result"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: ActionResultPayload  # type: ignore[override]
 
 
 class ActionDeniedPayload(BaseModel):
@@ -169,9 +169,9 @@ class ActionDeniedPayload(BaseModel):
 
 
 class ActionDeniedMessage(BaseEnvelope):
-    type: Literal["action_denied"] = "action_denied"
-    session_id: str
-    payload: ActionDeniedPayload
+    type: Literal["action_denied"] = "action_denied"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: ActionDeniedPayload  # type: ignore[override]
 
 
 class SessionResumePayload(BaseModel):
@@ -179,9 +179,9 @@ class SessionResumePayload(BaseModel):
 
 
 class SessionResumeMessage(BaseEnvelope):
-    type: Literal["session_resume"] = "session_resume"
-    session_id: str
-    payload: SessionResumePayload
+    type: Literal["session_resume"] = "session_resume"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: SessionResumePayload  # type: ignore[override]
 
 
 class SessionResumedPayload(BaseModel):
@@ -191,9 +191,9 @@ class SessionResumedPayload(BaseModel):
 
 
 class SessionResumedMessage(BaseEnvelope):
-    type: Literal["session_resumed"] = "session_resumed"
-    session_id: str
-    payload: SessionResumedPayload
+    type: Literal["session_resumed"] = "session_resumed"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: SessionResumedPayload  # type: ignore[override]
 
 
 SessionEndReason = Literal[
@@ -213,9 +213,9 @@ class SessionEndPayload(BaseModel):
 
 
 class SessionEndMessage(BaseEnvelope):
-    type: Literal["session_end"] = "session_end"
-    session_id: str
-    payload: SessionEndPayload
+    type: Literal["session_end"] = "session_end"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: SessionEndPayload  # type: ignore[override]
 
 
 class SessionErrorPayload(BaseModel):
@@ -226,20 +226,20 @@ class SessionErrorPayload(BaseModel):
 
 
 class SessionErrorMessage(BaseEnvelope):
-    type: Literal["session_error"] = "session_error"
-    session_id: str
-    payload: SessionErrorPayload
+    type: Literal["session_error"] = "session_error"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
+    payload: SessionErrorPayload  # type: ignore[override]
 
 
 class PingMessage(BaseEnvelope):
-    type: Literal["ping"] = "ping"
-    session_id: str
+    type: Literal["ping"] = "ping"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PongMessage(BaseEnvelope):
-    type: Literal["pong"] = "pong"
-    session_id: str
+    type: Literal["pong"] = "pong"  # type: ignore[override]
+    session_id: str  # type: ignore[override]
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 
