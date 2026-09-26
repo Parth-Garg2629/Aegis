@@ -121,9 +121,16 @@ export interface ActionObject {
   reasoning?: string | null;
 }
 
+export interface RiskAssessment {
+  level: 'safe' | 'high_risk' | 'blocked';
+  category: string | null;
+  reason: string | null;
+}
+
 export interface ActionPayload {
   step_number: number;
   action: ActionObject;
+  risk_assessment?: RiskAssessment | null;
 }
 export type ActionMessage = MessageEnvelope<ActionPayload> & {
   type: 'action';

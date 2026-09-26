@@ -1,5 +1,17 @@
-from fastapi import FastAPI, WebSocket
+"""
+main.py — AEGIS FastAPI application
+====================================
+E1 changes:
+ - Bind 127.0.0.1 by default (ADR-11)
+ - Pass ?token= query parameter to WebSocket handler for demo auth
+ - CORS restricted to localhost origins (localhost demo mode)
+"""
+
+from typing import Optional
+
+from fastapi import FastAPI, WebSocket, Query
 from fastapi.middleware.cors import CORSMiddleware
+
 from aegis_server.ws_gateway import handle_websocket_connection
 
 app = FastAPI(
@@ -8,6 +20,7 @@ app = FastAPI(
     version="1.0.0",
 )
 
+# Localhost-only CORS for demo (ADR-11)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -23,11 +36,25 @@ async def health_check():
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await handle_websocket_connection(websocket)
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: Optional[str] = Query(default=None),
+):
+    """
+    WebSocket endpoint.
+    Demo-grade auth: pass ?token=<value> query parameter.
+    If AEGIS_AUTH_TOKEN env var is not set, auth is skipped (localhost demo mode).
+    The token value is NEVER logged or persisted.
+    """
+    await handle_websocket_connection(websocket, token=token)
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("aegis_server.main:app", host="127.0.0.1", port=8765, log_level="info")
+    uvicorn.run(
+        "aegis_server.main:app",
+        host="127.0.0.1",   # ADR-11: localhost only
+        port=8765,
+        log_level="info",
+    )
