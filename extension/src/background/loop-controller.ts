@@ -329,7 +329,7 @@ export class LoopController {
             this.pendingActionResolver = null;
             reject(new Error('Timed out waiting for agent action'));
           }
-        }, 30000);
+        }, 120000);
       });
 
       this.wsClient.sendContextUpdate(sanitizedPayload);
