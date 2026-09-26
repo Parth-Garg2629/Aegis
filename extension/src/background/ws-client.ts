@@ -206,7 +206,7 @@ export class AegisWebSocketClient {
     this.sessionId = null;
   }
 
-  public sendActionDenied(step_number: number, denied_action_type: string, risk_category: string, denial_source: 'user' | 'risk_engine_blocked'): void {
+  public sendActionDenied(step_number: number, denied_action_type: string, risk_category: string, denial_source: 'user' | 'user_denied' | 'risk_engine_blocked'): void {
     if (!this.sessionId) return;
     const msg = {
       type: 'action_denied',

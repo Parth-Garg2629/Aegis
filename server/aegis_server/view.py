@@ -37,7 +37,7 @@ class SessionSummary(BaseModel):
     state: str
     current_step: int
     max_steps: int
-    created_at: float
+    created_at: str
     goal_present: bool                 # Privacy: boolean only, never raw goal
     uptime_seconds: float
 
@@ -46,7 +46,7 @@ class SessionDetail(BaseModel):
     state: str
     current_step: int
     max_steps: int
-    created_at: float
+    created_at: str
     goal_present: bool
     uptime_seconds: float
     action_history_last5: List[ActionHistoryItem]
@@ -76,8 +76,9 @@ class SessionListResponse(BaseModel):
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def _uptime(created_at: float) -> float:
-    return round(datetime.now(timezone.utc).timestamp() - created_at, 1)
+def _uptime(created_at: str) -> float:
+    created_at_dt = datetime.fromisoformat(created_at)
+    return round(datetime.now(timezone.utc).timestamp() - created_at_dt.timestamp(), 1)
 
 def _safe_value(value: Optional[str]) -> Optional[str]:
     """Return a privacy-safe version of an action value."""
@@ -94,7 +95,7 @@ def _safe_value(value: Optional[str]) -> Optional[str]:
 @router.get("/sessions", response_model=SessionListResponse)
 async def list_sessions():
     """List all active sessions with privacy-safe metadata."""
-    sessions = session_manager.list_active_sessions()
+    sessions = [s for s in session_manager._sessions.values() if s.is_active]
     summaries = []
     for s in sessions:
         summaries.append(SessionSummary(

@@ -69,6 +69,15 @@ chrome.runtime.onMessage.addListener((message: BusMessage, _sender, sendResponse
       break;
     }
 
+    case 'CONFIRM_ACTION': {
+      // Route user approve/deny decision back to the paused loop controller
+      if (loopController) {
+        loopController.handleConfirmation(message.approved);
+      }
+      sendResponse({ success: true });
+      break;
+    }
+
     default:
       break;
   }
