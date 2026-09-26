@@ -7,6 +7,7 @@ let loopController: LoopController | null = null;
 let lastKnownState: SessionStateUpdateMessage = {
   type: 'SESSION_STATE_UPDATE',
   state: 'idle',
+  detailedState: 'idle',
   step: 0,
   maxSteps: 30,
 };
@@ -59,6 +60,22 @@ chrome.runtime.onMessage.addListener((message: BusMessage, _sender, sendResponse
     case 'CANCEL_SESSION': {
       if (loopController) {
         loopController.cancel();
+      }
+      sendResponse({ success: true });
+      break;
+    }
+
+    case 'CONFIRM_ACTION': {
+      if (loopController) {
+        loopController.confirmAction();
+      }
+      sendResponse({ success: true });
+      break;
+    }
+
+    case 'DENY_ACTION': {
+      if (loopController) {
+        loopController.denyAction();
       }
       sendResponse({ success: true });
       break;

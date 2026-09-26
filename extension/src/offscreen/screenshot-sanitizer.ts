@@ -94,9 +94,9 @@ export async function sanitizeScreenshot(
     }
 
     // Downscale if necessary (e.g. to 1280x720 max bounds if needed, but per spec: downscale to 1280x720)
-    // Actually spec says "downscale to 1280x720 (or actual viewport if smaller)".
-    const MAX_W = 1280;
-    const MAX_H = 720;
+    // Downscale if necessary
+    const MAX_W = 1024;
+    const MAX_H = 768;
     let finalCanvas = canvas;
     
     if (canvas.width > MAX_W || canvas.height > MAX_H) {
@@ -111,7 +111,7 @@ export async function sanitizeScreenshot(
 
     // Convert to webp
     // Note: convertToBlob is async
-    const blob = await finalCanvas.convertToBlob({ type: 'image/webp', quality: 0.75 });
+    const blob = await finalCanvas.convertToBlob({ type: 'image/webp', quality: 0.50 });
     
     // Read blob as data URL
     const reader = new FileReader();

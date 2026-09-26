@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FP-14: Risk Button Gallery</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 900px; margin: 20px auto; padding: 20px; }
+        .section { margin-bottom: 40px; padding: 20px; border: 1px solid #e5e7eb; border-radius: 8px; }
+        button, a.btn { display: inline-block; padding: 10px 15px; margin: 5px; background: #e5e7eb; border: 1px solid #9ca3af; border-radius: 4px; text-decoration: none; color: black; cursor: pointer; }
+        .dangerous { background: #fee2e2; border-color: #ef4444; }
+        .safe { background: #dcfce7; border-color: #22c55e; }
+    </style>
+</head>
+<body>
+    <h1>FP-14: Risk Engine Corpus</h1>
+    
+    <div class="section">
+        <h2>HR-01: Payment & Finance</h2>
+        <button id="hr01-1" class="dangerous">Pay Now</button>
+        <button id="hr01-2" class="dangerous">Checkout</button>
+        <button id="hr01-3" class="dangerous">Transfer Funds</button>
+        <button id="safe-pay-1" class="safe">Payment History</button>
+        <button id="safe-pay-2" class="safe">View Invoices</button>
+    </div>
+
+    <div class="section">
+        <h2>HR-02: Account Deletion</h2>
+        <button id="hr02-1" class="dangerous">Delete Account</button>
+        <button id="hr02-2" class="dangerous">Close Profile</button>
+        <button id="safe-del-1" class="safe">Delete Draft</button>
+    </div>
+
+    <div class="section">
+        <h2>HR-06: Passwords & Credentials</h2>
+        <button id="hr06-1" class="dangerous">Change Password</button>
+        <button id="hr06-2" class="dangerous">Reveal Secret</button>
+        <button id="safe-pwd-1" class="safe">Password Policy</button>
+    </div>
+
+    <div class="section">
+        <h2>HR-07: Download Initiation</h2>
+        <a href="statement.pdf" download id="hr07-1" class="dangerous btn">Download Statement</a>
+        <button id="hr07-2" class="dangerous">Export as CSV</button>
+        <button id="safe-dl-1" class="safe">Download Instructions (View)</button>
+    </div>
+
+    <div class="section">
+        <h2>Blocked Categories</h2>
+        <a href="https://evil.com" id="blocked-1" class="dangerous btn">External Link</a>
+        <a href="javascript:alert(1)" id="blocked-2" class="dangerous btn">XSS Link</a>
+    </div>
+</body>
+</html>

@@ -1,0 +1,71 @@
+{
+  "page_id": "FP-01", 
+  "viewport": {"w": 1280, "h": 720}, 
+  "dpr": 1.0,
+  "pii": [
+    {
+      "id": "aadhaar", 
+      "category": "AADHAAR", 
+      "element_selector": "#aadhaar",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "2345 6789 0124", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "pan", 
+      "category": "PAN", 
+      "element_selector": "#pan",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "ABCDE1234F", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "mobile", 
+      "category": "PHONE", 
+      "element_selector": "#mobile",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "98765 43210", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "email", 
+      "category": "EMAIL", 
+      "element_selector": "#email",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "ramesh.kumar@example.com", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "bank_account", 
+      "category": "GENERIC_PII", 
+      "element_selector": "#bank_account",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "11228536740", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "password", 
+      "category": "PASSWORD", 
+      "element_selector": "#password",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    }
+  ],
+  "faces": [
+    {
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "size_bucket": "128+", 
+      "pose": "frontal", 
+      "occlusion": "none"
+    }
+  ],
+  "ui_elements": [],
+  "task_critical_elements": ["#submit-btn", "#category", "#state", "#city", "#course", "#declaration"]
+}

@@ -1,0 +1,40 @@
+{
+  "page_id": "FP-06", 
+  "viewport": {"w": 1280, "h": 720}, 
+  "dpr": 1.0,
+  "pii": [],
+  "faces": [
+    {
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "size_bucket": "≤ 32", 
+      "pose": "frontal", 
+      "occlusion": "none"
+    },
+    {
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "size_bucket": "64-128", 
+      "pose": "frontal", 
+      "occlusion": "none"
+    },
+    {
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "size_bucket": "> 128", 
+      "pose": "frontal", 
+      "occlusion": "none"
+    },
+    {
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "size_bucket": "64-128", 
+      "pose": "frontal", 
+      "occlusion": "none"
+    },
+    {
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "size_bucket": "64-128", 
+      "pose": "frontal", 
+      "occlusion": "partial"
+    }
+  ],
+  "ui_elements": [],
+  "task_critical_elements": []
+}

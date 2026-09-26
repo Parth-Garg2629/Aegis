@@ -1,0 +1,9 @@
+{
+  "page_id": "FP-14", 
+  "viewport": {"w": 1280, "h": 720}, 
+  "dpr": 1.0,
+  "pii": [],
+  "faces": [],
+  "ui_elements": [],
+  "task_critical_elements": []
+}

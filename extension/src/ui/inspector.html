@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AEGIS Device View (Inspector)</title>
+    <style>
+        body { font-family: system-ui, sans-serif; padding: 20px; background: #1a1a1a; color: #fff; }
+        .panel { border: 1px solid #333; padding: 15px; margin-bottom: 20px; background: #222; }
+        .metric { font-size: 24px; font-weight: bold; color: #22c55e; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #444; }
+    </style>
+</head>
+<body>
+    <h1>AEGIS Device View</h1>
+    <div class="panel">
+        <h2>Stage Latency</h2>
+        <div id="latency-gauges">
+            <p>Capture: <span class="metric" id="lat-capture">-- ms</span></p>
+            <p>Perception ML: <span class="metric" id="lat-ml">-- ms</span></p>
+            <p>Sanitization: <span class="metric" id="lat-sanitize">-- ms</span></p>
+            <p>Round Trip: <span class="metric" id="lat-total">-- ms</span></p>
+        </div>
+    </div>
+    <div class="panel">
+        <h2>Detection Signals</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Signal Type</th>
+                    <th>Count</th>
+                    <th>Confidence</th>
+                </tr>
+            </thead>
+            <tbody id="signal-table">
+                <!-- Populated via JS -->
+            </tbody>
+        </table>
+    </div>
+    <script src="inspector.js"></script>
+</body>
+</html>

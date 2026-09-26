@@ -1,0 +1,33 @@
+{
+    "fixture_id": "FP-05",
+    "description": "Secure Checkout",
+    "expected_sensitive_fields": [
+        {
+            "selector": "#cc-valid",
+            "type": "PAN",
+            "reason": "Luhn valid credit card"
+        }
+    ],
+    "expected_safe_fields": [
+        {
+            "selector": "#address",
+            "reason": "Address is not inherently sensitive unless explicitly defined"
+        },
+        {
+            "selector": "#cc-invalid",
+            "reason": "Luhn invalid card number is not redacted"
+        },
+        {
+            "selector": "#cc-masked",
+            "reason": "Partially masked card is safe"
+        }
+    ],
+    "high_risk_actions": [
+        {
+            "action": "click",
+            "target": "#pay-btn",
+            "rule": "HR-01",
+            "description": "Financial operation button click"
+        }
+    ]
+}

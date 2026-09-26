@@ -48,6 +48,9 @@ class SessionInitMessage(BaseEnvelope):
 
 class SessionCreatedPayload(BaseModel):
     server_max_steps: int = Field(ge=1, le=100, default=30)
+    provider_name: Optional[str] = None
+    model_name: Optional[str] = None
+    is_mock: Optional[bool] = None
 
 
 class SessionCreatedMessage(BaseEnvelope):

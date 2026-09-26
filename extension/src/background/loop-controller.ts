@@ -14,10 +14,13 @@ import { ensureOffscreenDocument } from './offscreen-manager';
 import { AegisWebSocketClient } from './ws-client';
 import { scanGoal, validateAction, evaluateActionRisk } from '@aegis/core';
 import type {
+  DetailedState,
   ExecuteActionRequestMessage,
   ExecuteActionResponseMessage,
   ExtractDomRequestMessage,
   ExtractDomResponseMessage,
+  PendingConfirmation,
+  ProviderInfo,
   SessionStateUpdateMessage,
 } from './bus';
 
@@ -27,6 +30,7 @@ export type LoopState =
   | 'capturing'
   | 'sanitizing'
   | 'awaiting_action'
+  | 'awaiting_confirmation'
   | 'executing'
   | 'completed'
   | 'failed'
@@ -71,6 +75,14 @@ export class LoopController {
   private pendingActionResolver: ((action: ActionObject) => void) | null = null;
   private pendingSessionResolver: ((session: SessionCreatedMessage) => void) | null = null;
 
+  // Confirmation flow
+  private pendingConfirmationAction: ActionObject | null = null;
+  private pendingConfirmationRisk: { category: string; reason: string } | null = null;
+  private confirmationResolver: ((approved: boolean) => void) | null = null;
+
+  // Provider info from server
+  private providerInfo: ProviderInfo | null = null;
+
   constructor(options: LoopControllerOptions = {}) {
     this.maxSteps = options.maxSteps || 30;
     this.onStateChange = options.onStateChange;
@@ -78,12 +90,32 @@ export class LoopController {
 
     this.wsClient.setCallbacks({
       onSessionCreated: (msg) => {
+        // Extract provider info from session_created if available
+        const payload = msg.payload as any;
+        if (payload.provider_name) {
+          this.providerInfo = {
+            providerName: payload.provider_name,
+            modelName: payload.model_name,
+            isMock: payload.is_mock === true,
+          };
+        }
+
         if (this.pendingSessionResolver) {
           this.pendingSessionResolver(msg);
           this.pendingSessionResolver = null;
         }
       },
       onAction: (msg: ActionMessage) => {
+        // Extract provider info from action response if available
+        const payload = msg.payload as any;
+        if (payload.provider_name) {
+          this.providerInfo = {
+            providerName: payload.provider_name,
+            modelName: payload.model_name,
+            isMock: payload.is_mock === true,
+          };
+        }
+
         if (this.pendingActionResolver) {
           this.pendingActionResolver(msg.payload.action);
           this.pendingActionResolver = null;
@@ -121,6 +153,22 @@ export class LoopController {
     return this.wsClient.getSessionId();
   }
 
+  /** Called when the user approves a high-risk action. */
+  public confirmAction(): void {
+    if (this.confirmationResolver) {
+      this.confirmationResolver(true);
+      this.confirmationResolver = null;
+    }
+  }
+
+  /** Called when the user denies a high-risk action. */
+  public denyAction(): void {
+    if (this.confirmationResolver) {
+      this.confirmationResolver(false);
+      this.confirmationResolver = null;
+    }
+  }
+
   public async start(goal: string, targetTabId?: number): Promise<void> {
     if (this.state !== 'idle' && this.state !== 'completed' && this.state !== 'failed' && this.state !== 'cancelled') {
       throw new Error(`Cannot start loop while in state "${this.state}"`);
@@ -129,6 +177,10 @@ export class LoopController {
     this.goal = goal;
     this.currentStep = 0;
     this.previousResult = null;
+    this.pendingConfirmationAction = null;
+    this.pendingConfirmationRisk = null;
+    this.confirmationResolver = null;
+    this.providerInfo = null;
     this.transition('starting');
 
     if (targetTabId) {
@@ -187,6 +239,12 @@ export class LoopController {
       step: this.currentStep,
     });
 
+    // Reject any pending confirmation
+    if (this.confirmationResolver) {
+      this.confirmationResolver(false);
+      this.confirmationResolver = null;
+    }
+
     this.wsClient.sendSessionEnd('user_cancelled', this.currentStep);
     this.wsClient.disconnect();
     this.transition('cancelled');
@@ -223,8 +281,6 @@ export class LoopController {
               event: 'GOAL_CONTAINS_PII',
               message: 'Goal text contained sensitive information which was scrubbed.'
           });
-          // Update goal for server if we want, but usually server already has it from session start.
-          // Wait, the spec says "Warn user; do not block by default".
       }
 
       this.transition('sanitizing');
@@ -271,20 +327,15 @@ export class LoopController {
         sanitizedPayload = buildResult.payload;
         
       } catch (err) {
-        // Fallback to minimal context if offscreen isn't ready or fails, for walking skeleton compatibility
         slog.error({
            module: 'LOOP_CONTROLLER',
            event: 'OFFSCREEN_PIPELINE_FAILED',
            message: err instanceof Error ? err.message : String(err)
         });
         
-        // Wait! The spec says: "If exception thrown anywhere -> throw SanitizationError (fail-closed)"
-        // But the fallback is needed for tests. 
-        // "buildMinimalSanitizedContext() in context-builder.ts kept for walking-skeleton compatibility... loop controller will prefer full privacy-builder path."
-        // We can just throw and let it fail closed, EXCEPT if the offscreen document is not available at all, maybe we fallback?
-        // No, D5 says "throw (caller must NOT send)".
+        // Fail closed: sanitization failure prevents transmission
         slog.error({ module: 'LOOP_CONTROLLER', event: 'FAIL_CLOSED', message: 'Sanitization failed. Cannot send data.' });
-        this.transition('failed', { error: 'Sanitization failed' });
+        this.transition('failed', { error: 'Sanitization failed — data not transmitted' });
         break;
       }
 
@@ -296,11 +347,19 @@ export class LoopController {
             this.pendingActionResolver = null;
             reject(new Error('Timed out waiting for agent action'));
           }
-        }, 30000);
+        }, 120000);
       });
 
       this.wsClient.sendContextUpdate(sanitizedPayload);
-      const action = await actionPromise;
+      let action: ActionObject;
+      try {
+        action = await actionPromise;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        slog.error({ module: 'LOOP_CONTROLLER', event: 'ACTION_WAIT_FAILED', message });
+        this.transition('failed', { error: message });
+        break;
+      }
 
       slog.info({
         module: 'LOOP_CONTROLLER',
@@ -309,6 +368,7 @@ export class LoopController {
         action_type: action.action_type,
       });
 
+      // Validate action
       const validation = validateAction(action);
       if (!validation.valid) {
         slog.error({ module: 'LOOP_CONTROLLER', event: 'ACTION_VALIDATION_FAILED', message: validation.error });
@@ -323,14 +383,68 @@ export class LoopController {
         break;
       }
 
+      // Risk assessment
       const risk = evaluateActionRisk(action, domSchema);
-      if (risk.level === 'blocked' || risk.level === 'high_risk') {
+
+      // BLOCKED → never execute
+      if (risk.level === 'blocked') {
         slog.warn({ module: 'LOOP_CONTROLLER', event: 'ACTION_BLOCKED_BY_RISK_ENGINE', reason: risk.reason });
         this.wsClient.sendActionDenied(this.currentStep, action.action_type, risk.matchedCategory || 'HR-UNKNOWN', 'risk_engine_blocked');
+        this.transition('failed', {
+          error: `Action blocked: ${risk.reason}`,
+          lastAction: action.action_type,
+        });
         this.finish('agent_failed');
         break;
       }
 
+      // HIGH-RISK → ask user for confirmation
+      if (risk.level === 'high_risk') {
+        slog.info({
+          module: 'LOOP_CONTROLLER',
+          event: 'ACTION_REQUIRES_CONFIRMATION',
+          action_type: action.action_type,
+          risk_category: risk.matchedCategory,
+        });
+
+        this.pendingConfirmationAction = action;
+        this.pendingConfirmationRisk = {
+          category: risk.matchedCategory || 'HR-UNKNOWN',
+          reason: risk.reason || 'High-risk action detected',
+        };
+
+        this.transition('awaiting_confirmation', {
+          lastAction: action.action_type,
+          reasoning: action.reasoning || undefined,
+        });
+
+        // Wait for user decision
+        const approved = await new Promise<boolean>((resolve) => {
+          this.confirmationResolver = resolve;
+          // Safety timeout: auto-deny after 60 seconds
+          setTimeout(() => {
+            if (this.confirmationResolver) {
+              slog.warn({ module: 'LOOP_CONTROLLER', event: 'CONFIRMATION_TIMEOUT', step: this.currentStep });
+              this.confirmationResolver = null;
+              resolve(false);
+            }
+          }, 60000);
+        });
+
+        this.pendingConfirmationAction = null;
+        this.pendingConfirmationRisk = null;
+
+        if (!approved) {
+          slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_DENIED_BY_USER', step: this.currentStep });
+          this.wsClient.sendActionDenied(this.currentStep, action.action_type, risk.matchedCategory || 'HR-UNKNOWN', 'user');
+          this.finish('agent_failed');
+          break;
+        }
+
+        slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_APPROVED_BY_USER', step: this.currentStep });
+      }
+
+      // Execute the action
       this.transition('executing', {
         lastAction: action.action_type,
         reasoning: action.reasoning || undefined,
@@ -451,7 +565,34 @@ export class LoopController {
     if (reason === 'goal_achieved') {
       this.transition('completed');
     } else {
-      this.transition('failed', { error: `Terminated with reason: ${reason}` });
+      this.transition('failed', { error: `Terminated: ${reason}` });
+    }
+  }
+
+  private mapToDetailedState(loopState: LoopState): DetailedState {
+    switch (loopState) {
+      case 'idle': return 'idle';
+      case 'starting': return 'starting';
+      case 'capturing': return 'capturing';
+      case 'sanitizing': return 'sanitizing';
+      case 'awaiting_action': return 'awaiting_action';
+      case 'awaiting_confirmation': return 'awaiting_confirmation';
+      case 'executing': return 'executing';
+      case 'completed': return 'completed';
+      case 'failed': return 'failed';
+      case 'cancelled': return 'cancelled';
+      default: return 'idle';
+    }
+  }
+
+  private mapToHighLevelState(loopState: LoopState): 'idle' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' {
+    switch (loopState) {
+      case 'idle': return 'idle';
+      case 'completed': return 'completed';
+      case 'failed': return 'failed';
+      case 'cancelled': return 'cancelled';
+      case 'awaiting_confirmation': return 'paused';
+      default: return 'running';
     }
   }
 
@@ -460,23 +601,29 @@ export class LoopController {
     meta: { lastAction?: string; reasoning?: string; error?: string } = {},
   ): void {
     this.state = newState;
+
+    let pendingConfirmation: PendingConfirmation | null = null;
+    if (newState === 'awaiting_confirmation' && this.pendingConfirmationAction && this.pendingConfirmationRisk) {
+      pendingConfirmation = {
+        actionType: this.pendingConfirmationAction.action_type,
+        target: this.pendingConfirmationAction.target,
+        reasoning: this.pendingConfirmationAction.reasoning,
+        riskCategory: this.pendingConfirmationRisk.category,
+        riskReason: this.pendingConfirmationRisk.reason,
+      };
+    }
+
     const update: SessionStateUpdateMessage = {
       type: 'SESSION_STATE_UPDATE',
-      state:
-        newState === 'completed'
-          ? 'completed'
-          : newState === 'failed'
-            ? 'failed'
-            : newState === 'cancelled'
-              ? 'cancelled'
-              : newState === 'idle'
-                ? 'idle'
-                : 'running',
+      state: this.mapToHighLevelState(newState),
+      detailedState: this.mapToDetailedState(newState),
       step: this.currentStep,
       maxSteps: this.maxSteps,
       lastAction: meta.lastAction,
       reasoning: meta.reasoning,
       error: meta.error,
+      pendingConfirmation,
+      providerInfo: this.providerInfo,
     };
 
     this.onStateChange?.(update);

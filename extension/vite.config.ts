@@ -63,7 +63,12 @@ function bundleMlAssetsPlugin() {
       const ortSrc = resolve(__dirname, 'node_modules/onnxruntime-web/dist');
       const ortDest = resolve(distAssets, 'ort');
       mkdirSync(ortDest, { recursive: true });
-      for (const file of ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs']) {
+      for (const file of [
+        'ort-wasm-simd-threaded.wasm', 
+        'ort-wasm-simd-threaded.mjs',
+        'ort-wasm-simd-threaded.jsep.wasm',
+        'ort-wasm-simd-threaded.jsep.mjs'
+      ]) {
         const src = resolve(ortSrc, file);
         if (existsSync(src)) copyFileSync(src, resolve(ortDest, file));
       }

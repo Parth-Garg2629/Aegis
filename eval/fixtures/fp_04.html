@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FP-04: Login / OTP page</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 500px; margin: 40px auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; margin-bottom: 10px;}
+        button { background: #2563eb; color: white; border: none; padding: 10px 20px; cursor: pointer; width: 100%; font-size: 16px;}
+    </style>
+</head>
+<body>
+    <h1>Login to e-Scholar</h1>
+    
+    <div class="form-group">
+        <label for="username">Email</label>
+        <input type="email" id="username" value="test@example.com">
+    </div>
+    
+    <div class="form-group">
+        <label for="password">Password (type="password")</label>
+        <input type="password" id="password" value="Secret123">
+    </div>
+    
+    <div class="form-group">
+        <label for="password-text">Password (type="text", toggled)</label>
+        <input type="text" id="password-text" value="Secret123">
+    </div>
+
+    <h3>Verify OTP</h3>
+    <p>Please enter the OTP sent to your email.</p>
+    
+    <div class="form-group">
+        <label for="otp-number">OTP (type="number")</label>
+        <input type="number" id="otp-number" autocomplete="one-time-code" value="123456">
+    </div>
+
+    <div class="form-group">
+        <label for="otp-text">OTP (type="text")</label>
+        <input type="text" id="otp-text" autocomplete="one-time-code" value="654321">
+    </div>
+
+    <div class="form-group">
+        <label for="otp-tel">OTP (type="tel")</label>
+        <input type="tel" id="otp-tel" autocomplete="one-time-code" value="987654">
+    </div>
+
+    <button id="login-btn">Secure Login</button>
+
+</body>
+</html>

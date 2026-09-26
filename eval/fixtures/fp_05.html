@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FP-05: Secure Checkout</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        input { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { background: #22c55e; color: white; border: none; padding: 10px 20px; cursor: pointer; width: 100%; font-size: 16px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Checkout</h1>
+    
+    <h3>Shipping Address</h3>
+    <div class="form-group">
+        <label for="address">Address</label>
+        <input type="text" id="address" value="123 Main St, Apt 4B">
+    </div>
+    
+    <h3>Payment Details</h3>
+    <div class="form-group">
+        <label for="cc-valid">Credit Card (Luhn valid)</label>
+        <input type="text" id="cc-valid" value="4111 1111 1111 1111">
+    </div>
+
+    <div class="form-group">
+        <label for="cc-invalid">Credit Card (Luhn invalid)</label>
+        <input type="text" id="cc-invalid" value="4111 1111 1111 1112">
+    </div>
+
+    <div class="form-group">
+        <label for="cc-masked">Credit Card (Partial mask)</label>
+        <input type="text" id="cc-masked" value="**** **** **** 1234">
+    </div>
+
+    <button id="pay-btn">Pay Now</button>
+
+</body>
+</html>

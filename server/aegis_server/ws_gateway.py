@@ -42,6 +42,7 @@ from aegis_server.protocol import (
     SessionResumedPayload,
 )
 from aegis_server.orchestrator import orchestrator
+from aegis_server.providers import get_configured_provider
 from aegis_server.session import session_manager, SessionState
 from aegis_server.audit_db import audit_db
 from aegis_server.slog import slog
@@ -203,14 +204,25 @@ async def handle_websocket_connection(
                     audit_db.record_session_start(
                         session_id=current_session_id,
                         protocol_version=init_msg.protocol_version,
-                        client_metadata=init_msg.payload.client_metadata,
+                        client_metadata=init_msg.payload.client_metadata.model_dump(),
                         start_time=init_msg.timestamp
                     )
+
+                    # Determine provider info for transparency
+                    _provider = orchestrator.provider
+                    _provider_name = type(_provider).__name__
+                    _is_mock = "mock" in _provider_name.lower()
+                    _model_name = getattr(_provider, 'model_name', None) or ('mock-deterministic' if _is_mock else 'unknown')
 
                     created_msg = SessionCreatedMessage(
                         session_id=current_session_id,
                         timestamp=make_timestamp(),
-                        payload=SessionCreatedPayload(server_max_steps=session.max_steps),
+                        payload=SessionCreatedPayload(
+                            server_max_steps=session.max_steps,
+                            provider_name=_provider_name,
+                            model_name=_model_name,
+                            is_mock=_is_mock,
+                        ),
                     )
                     await websocket.send_text(created_msg.model_dump_json())
                     
@@ -454,6 +466,42 @@ async def handle_websocket_connection(
                     slog.warn(
                         module="WS_GATEWAY",
                         event="PING_PARSE_ERROR",
+                        session_id=current_session_id or "unknown",
+                    )
+
+            # ── action_denied ──────────────────────────────────────────────────
+            elif msg_type == "action_denied":
+                try:
+                    from aegis_server.protocol import ActionDeniedMessage
+                    denied_msg = ActionDeniedMessage.model_validate(data)
+                    slog.info(
+                        module="WS_GATEWAY",
+                        event="ACTION_DENIED_RECEIVED",
+                        session_id=denied_msg.session_id,
+                        step_number=denied_msg.payload.step_number,
+                        denied_action_type=denied_msg.payload.denied_action_type,
+                        denial_source=denied_msg.payload.denial_source,
+                    )
+                    audit_db.record_action(
+                        session_id=denied_msg.session_id,
+                        step_number=denied_msg.payload.step_number,
+                        action_type=denied_msg.payload.denied_action_type,
+                        target_element_id=None,
+                        sanitized_target_role=None,
+                        value_classification="DENIED",
+                        action_value_safe=None,
+                        vlm_reasoning=None,
+                        risk_category=denied_msg.payload.risk_category,
+                        confirmation_required=True,
+                        confirmation_outcome="DENIED",
+                        execution_status="DENIED",
+                        error_code=None,
+                        timestamp=make_timestamp(),
+                    )
+                except Exception:
+                    slog.warn(
+                        module="WS_GATEWAY",
+                        event="ACTION_DENIED_PARSE_ERROR",
                         session_id=current_session_id or "unknown",
                     )
 

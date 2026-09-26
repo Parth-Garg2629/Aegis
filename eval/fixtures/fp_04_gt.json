@@ -1,0 +1,64 @@
+{
+  "page_id": "FP-04", 
+  "viewport": {"w": 1280, "h": 720}, 
+  "dpr": 1.0,
+  "pii": [
+    {
+      "id": "username", 
+      "category": "EMAIL", 
+      "element_selector": "#username",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "test@example.com", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "password", 
+      "category": "PASSWORD", 
+      "element_selector": "#password",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "Secret123", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "password-text", 
+      "category": "PASSWORD", 
+      "element_selector": "#password-text",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "Secret123", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "otp-number", 
+      "category": "OTP", 
+      "element_selector": "#otp-number",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "123456", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "otp-text", 
+      "category": "OTP", 
+      "element_selector": "#otp-text",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "654321", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    },
+    {
+      "id": "otp-tel", 
+      "category": "OTP", 
+      "element_selector": "#otp-tel",
+      "bbox": {"x": 0, "y": 0, "w": 0, "h": 0}, 
+      "value_canary": "987654", 
+      "expected_action": "BLUR_AND_REPLACE",
+      "expected_outcome": "DETECT"
+    }
+  ],
+  "faces": [],
+  "ui_elements": [],
+  "task_critical_elements": ["#login-btn"]
+}
