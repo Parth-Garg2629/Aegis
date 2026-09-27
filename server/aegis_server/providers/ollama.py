@@ -43,7 +43,7 @@ class OllamaProvider(VLMProvider):
         self,
         url: str = "http://127.0.0.1:11434",
         model: str = "qwen3-vl:4b",
-        timeout_seconds: float = 60.0,
+        timeout_seconds: float = 300.0,
     ):
         self.url = url.rstrip("/")
         self.model_name = model
@@ -311,6 +311,7 @@ class OllamaProvider(VLMProvider):
             # JSON extraction
             # ----------------------------------------------------------
 
+            slog.error(module="OLLAMA", event="DEBUG_RAW_CONTENT", reason=repr(content)[:1000])
             parsed = self._extract_json_object(content)
 
             if parsed is None:
@@ -422,7 +423,7 @@ class OllamaProvider(VLMProvider):
 
         images: List[str] = []
 
-        if context.sanitized_screenshot:
+        if context.sanitized_screenshot and ("vl" in self.model_name.lower() or "vision" in self.model_name.lower()):
             img = context.sanitized_screenshot
 
             if img.startswith("data:image"):
@@ -475,14 +476,10 @@ class OllamaProvider(VLMProvider):
                 },
             ],
 
-            # Ollama structured-output support.
-            "format": "json",
-
-            # Deterministic agent behavior.
+            "format": schema,
             "options": {
                 "temperature": 0.0,
                 "top_p": 0.8,
-                "num_predict": 512,
             },
 
             # Qwen3 supports thinking control.
@@ -544,7 +541,7 @@ ollama_vlm_provider = OllamaProvider(
     timeout_seconds=float(
         os.environ.get(
             "OLLAMA_TIMEOUT_SECONDS",
-            "60",
+            "300",
         )
     ),
 )

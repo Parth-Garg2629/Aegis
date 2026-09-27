@@ -107,6 +107,13 @@ export class LoopController {
           code: msg.payload.error_code,
           message: msg.payload.error_message,
         });
+        if (this.pendingActionResolver) {
+           this.pendingActionResolver = null;
+           // We must break the promise loop so it doesn't hang!
+           if ((this as any)._rejectPendingAction) {
+               (this as any)._rejectPendingAction(new Error(msg.payload.error_message));
+           }
+        }
       },
       onClose: () => {
         if (this.state !== 'completed' && this.state !== 'cancelled' && this.state !== 'idle') {
@@ -324,12 +331,14 @@ export class LoopController {
       this.transition('awaiting_action');
       const actionPromise = new Promise<ActionObject>((resolve, reject) => {
         this.pendingActionResolver = resolve;
+        (this as any)._rejectPendingAction = reject;
         setTimeout(() => {
           if (this.pendingActionResolver) {
             this.pendingActionResolver = null;
-            reject(new Error('Timed out waiting for agent action'));
+            (this as any)._rejectPendingAction = null;
+            reject(new Error('Timed out waiting for agent action (300s)'));
           }
-        }, 120000);
+        }, 300000);
       });
 
       this.wsClient.sendContextUpdate(sanitizedPayload);

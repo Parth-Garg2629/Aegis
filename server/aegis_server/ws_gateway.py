@@ -49,8 +49,8 @@ from aegis_server.slog import slog
 
 # ── Constants ────────────────────────────────────────────────────────────────
 MAX_MESSAGE_BYTES: int = 2 * 1024 * 1024   # 2 MB
-IDLE_TIMEOUT_SECONDS: float = 120.0
-VLM_TIMEOUT_SECONDS: float = 30.0
+IDLE_TIMEOUT_SECONDS: float = 300.0
+VLM_TIMEOUT_SECONDS: float = 300.0
 
 
 def make_timestamp() -> str:

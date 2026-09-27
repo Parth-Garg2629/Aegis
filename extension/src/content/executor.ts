@@ -86,6 +86,12 @@ export async function executeAction(action: ActionObject, stepNumber: number): P
 
         el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
         el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+        
+        // Simulate pressing Enter to trigger form submissions (vital for search bars)
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true, cancelable: true }));
+        if (el.form) {
+            el.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        }
 
         return { step_number: stepNumber, action_type, success: true };
       }
