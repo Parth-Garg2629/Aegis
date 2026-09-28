@@ -3,6 +3,7 @@ export const APPROVED_PERMISSIONS = [
   'storage',
   'offscreen',
   'scripting',
+  'tabs',
 ] as const;
 
 export function generateManifest() {

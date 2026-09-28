@@ -23,12 +23,13 @@ export async function captureActiveTab(tabId?: number): Promise<CaptureResult> {
       }
 
       const dataUrl = await chrome.tabs.captureVisibleTab(currentTab.windowId, {
-        format: 'png',
+        format: 'jpeg',
+        quality: 85,
       });
 
       return {
         screenshotDataUrl: dataUrl || MINIMAL_WEBP_BASE64,
-        format: 'webp',
+        format: 'jpeg',
         dpr: 1.0,
         width: currentTab.width || 1280,
         height: currentTab.height || 800,

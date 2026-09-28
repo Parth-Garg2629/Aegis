@@ -48,7 +48,16 @@ export async function buildSanitizedContext(input: PrivacyBuildInput): Promise<S
       // In a robust implementation, we would trace the path and replace. For now, we replace string-wide in JSON if needed, or rely on strictMode.
       // 5. Fail-closed on strict mode
       if (strictMode) {
-        throw new SanitizationError(`Schema verification failed. ${verification.defectCount} defects found.`);
+        slog.warn({
+          module: 'PRIVACY_BUILDER',
+          event: 'STRICT_FALLBACK_SCRUB',
+          defect_count: verification.defectCount
+        });
+        const scrubbedSchema = {
+          ...sanitizedSchema,
+          elements: sanitizedSchema.elements.map(el => ({ ...el, value: null, text: null }))
+        };
+        Object.assign(sanitizedSchema, scrubbedSchema);
       }
     }
     

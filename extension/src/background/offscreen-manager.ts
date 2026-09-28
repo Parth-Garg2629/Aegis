@@ -23,7 +23,7 @@ export async function ensureOffscreenDocument(): Promise<void> {
     try {
       await chrome.offscreen.createDocument({
         url: 'offscreen.html',
-        reasons: ['BLOBS', 'DOM_PARSER'] as any,
+        reasons: ['BLOBS'] as any,
         justification: 'On-device perception and screenshot sanitization',
       });
       slog.info({

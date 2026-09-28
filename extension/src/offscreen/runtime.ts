@@ -100,7 +100,7 @@ if (hasChromeRuntime && chrome.runtime.onMessage) {
           visual: visualReady ? { modelManager, decodeConfig, sourceModel: 'aegis-nano-v1' } : null,
           faceDetector: faceReady ? faceDetector : null,
         })
-          .then((result) => sendResponse(result))
+          .then((result) => sendResponse({ ...result, _nonce: (message as any)._nonce }))
           .catch((err: unknown) => {
             slog.error({
               module: 'OFFSCREEN_RUNTIME',
@@ -115,7 +115,7 @@ if (hasChromeRuntime && chrome.runtime.onMessage) {
       
       if (message?.type === 'BUILD_SANITIZED_CONTEXT') {
          buildSanitizedContext(message.input)
-           .then(res => sendResponse({ success: true, payload: res }))
+           .then(res => sendResponse({ success: true, payload: res, _nonce: (message as any)._nonce }))
            .catch(err => {
              slog.error({
                module: 'OFFSCREEN_RUNTIME',

@@ -32,6 +32,8 @@ def get_configured_provider() -> VLMProvider:
         return cloud_provider
     else:
         # Default fallback to mock
+        if provider_name == "mock":
+            slog.warn(module="PROVIDER_FACTORY", event="USING_MOCK_PROVIDER", reason="VLM_PROVIDER not set. Set VLM_PROVIDER=ollama for real inference.")
         slog.info(module="PROVIDER_FACTORY", event="PROVIDER_SELECTED", provider="mock")
         return mock_vlm_provider
 

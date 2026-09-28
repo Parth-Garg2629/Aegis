@@ -50,10 +50,12 @@ async function sendMessageWithRetry<T = any>(message: any, maxRetries = 15, dela
   if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
     throw new Error('Chrome runtime not available');
   }
+  const nonce = Math.random().toString(36).slice(2);
+  const taggedMessage = { ...message, _nonce: nonce };
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      const response = await chrome.runtime.sendMessage(message);
-      if (response !== undefined) {
+      const response = await chrome.runtime.sendMessage(taggedMessage);
+      if (response !== undefined && response !== null && response._nonce === nonce) {
         return response;
       }
     } catch (err: any) {

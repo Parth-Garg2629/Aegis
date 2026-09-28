@@ -1,3 +1,8 @@
+/**
+ * @deprecated This file is NOT used in the active pipeline.
+ * The active path goes through offscreen/privacy-builder.ts via loop-controller.ts.
+ * Retained for reference only.
+ */
 import type {
   ContextUpdatePayload,
   PreviousActionResult,

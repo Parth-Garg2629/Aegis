@@ -18,6 +18,9 @@ function getOrCreateLoopController(): LoopController {
         lastKnownState = update;
         chrome.runtime.sendMessage(update).catch(() => {
         });
+        if (update.state === 'completed' || update.state === 'failed' || update.state === 'cancelled') {
+          loopController = null;
+        }
       },
     });
   }
