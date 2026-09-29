@@ -46,6 +46,20 @@ export interface ConfirmationMeta {
   riskReason: string;
 }
 
+interface PendingSessionWait {
+  resolve: (message: SessionCreatedMessage) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+interface PendingActionWait {
+  sessionId: string | null;
+  stepNumber: number;
+  resolve: (action: ActionObject) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
 async function sendMessageWithRetry<T = any>(message: any, maxRetries = 15, delayMs = 200): Promise<T> {
   if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
     throw new Error('Chrome runtime not available');
@@ -78,8 +92,8 @@ export class LoopController {
   private wsClient: AegisWebSocketClient;
   private onStateChange?: (update: SessionStateUpdateMessage) => void;
 
-  private pendingActionResolver: ((action: ActionObject) => void) | null = null;
-  private pendingSessionResolver: ((session: SessionCreatedMessage) => void) | null = null;
+  private pendingActionWait: PendingActionWait | null = null;
+  private pendingSessionWait: PendingSessionWait | null = null;
 
   // Confirmation flow: resolve = user responded (true=approved, false=denied)
   private pendingConfirmResolver: ((approved: boolean) => void) | null = null;
@@ -91,17 +105,30 @@ export class LoopController {
 
     this.wsClient.setCallbacks({
       onSessionCreated: (msg) => {
-        if (this.pendingSessionResolver) {
-          this.pendingSessionResolver(msg);
-          this.pendingSessionResolver = null;
-        }
+        const wait = this.pendingSessionWait;
+        if (!wait) return;
+        this.pendingSessionWait = null;
+        clearTimeout(wait.timeout);
+        wait.resolve(msg);
       },
       onAction: (msg: ActionMessage) => {
         slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_RECEIVED', session_id: msg.session_id, step_number: msg.payload.step_number, action_type: msg.payload.action.action_type, correlation_id: `${msg.session_id}:${msg.payload.step_number}` });
-        if (this.pendingActionResolver) {
-          this.pendingActionResolver(msg.payload.action);
-          this.pendingActionResolver = null;
+        const wait = this.pendingActionWait;
+        if (!wait) return;
+        if (msg.session_id !== wait.sessionId || msg.payload.step_number !== wait.stepNumber) {
+          slog.warn({
+            module: 'LOOP_CONTROLLER',
+            event: 'STALE_ACTION_IGNORED',
+            session_id: msg.session_id,
+            step_number: msg.payload.step_number,
+            action_type: msg.payload.action.action_type,
+            error_code: 'ACTION_CORRELATION_MISMATCH',
+          });
+          return;
         }
+        this.pendingActionWait = null;
+        clearTimeout(wait.timeout);
+        wait.resolve(msg.payload.action);
       },
       onSessionError: (msg) => {
         slog.error({
@@ -110,15 +137,16 @@ export class LoopController {
           code: msg.payload.error_code,
           message: msg.payload.error_message,
         });
-        if (this.pendingActionResolver) {
-           this.pendingActionResolver = null;
-           // We must break the promise loop so it doesn't hang!
-           if ((this as any)._rejectPendingAction) {
-               (this as any)._rejectPendingAction(new Error(msg.payload.error_message));
-           }
-        }
+        this.rejectPendingAction(new Error(msg.payload.error_message));
       },
       onClose: () => {
+        this.rejectPendingSession(new Error('WebSocket closed before session creation'));
+        this.rejectPendingAction(new Error('WebSocket closed while waiting for an action'));
+        if (this.pendingConfirmResolver) {
+          const resolve = this.pendingConfirmResolver;
+          this.pendingConfirmResolver = null;
+          resolve(false);
+        }
         if (this.state !== 'completed' && this.state !== 'cancelled' && this.state !== 'idle') {
           this.transition('failed', { error: 'WebSocket disconnected unexpectedly' });
         }
@@ -176,14 +204,14 @@ export class LoopController {
     this.previousResult = null;
     this.transition('starting');
 
-    if (targetTabId) {
-      this.activeTabId = targetTabId;
-    } else if (typeof chrome !== 'undefined' && chrome.tabs) {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      this.activeTabId = tabs[0]?.id || null;
-    }
-
     try {
+      if (targetTabId !== undefined) {
+        this.activeTabId = targetTabId;
+      } else if (typeof chrome !== 'undefined' && chrome.tabs) {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        this.activeTabId = tabs[0]?.id ?? null;
+      }
+
       await this.wsClient.connect();
 
       const clientMeta: ClientMetadata = {
@@ -194,13 +222,16 @@ export class LoopController {
       };
 
       const sessionCreatedPromise = new Promise<SessionCreatedMessage>((resolve, reject) => {
-        this.pendingSessionResolver = resolve;
-        setTimeout(() => {
-          if (this.pendingSessionResolver) {
-            this.pendingSessionResolver = null;
+        const wait: PendingSessionWait = {
+          resolve,
+          reject,
+          timeout: setTimeout(() => {
+            if (this.pendingSessionWait !== wait) return;
+            this.pendingSessionWait = null;
             reject(new Error('Timed out waiting for session_created'));
-          }
-        }, 10000);
+          }, 10000),
+        };
+        this.pendingSessionWait = wait;
       });
 
       this.wsClient.sendSessionInit(this.goal, clientMeta);
@@ -212,6 +243,7 @@ export class LoopController {
       this.currentStep = 1;
       await this.runLoop();
     } catch (err: unknown) {
+      if (this.state === 'completed' || this.state === 'failed' || this.state === 'cancelled') return;
       const message = err instanceof Error ? err.message : String(err);
       slog.error({
         module: 'LOOP_CONTROLLER',
@@ -243,7 +275,13 @@ export class LoopController {
       resolve(false);
     }
 
-    this.wsClient.sendSessionEnd('user_cancelled', this.currentStep);
+    try {
+      this.wsClient.sendSessionEnd('user_cancelled', this.currentStep);
+    } catch {
+      slog.warn({ module: 'LOOP_CONTROLLER', event: 'SESSION_END_SEND_FAILED', error_code: 'SESSION_END_SEND_FAILED' });
+    }
+    this.rejectPendingSession(new Error('Session cancelled'));
+    this.rejectPendingAction(new Error('Session cancelled'));
     this.wsClient.disconnect();
     this.transition('cancelled');
   }
@@ -355,15 +393,25 @@ export class LoopController {
 
       this.transition('awaiting_action');
       const actionPromise = new Promise<ActionObject>((resolve, reject) => {
-        this.pendingActionResolver = resolve;
-        (this as any)._rejectPendingAction = reject;
-        setTimeout(() => {
-          if (this.pendingActionResolver) {
-            this.pendingActionResolver = null;
-            (this as any)._rejectPendingAction = null;
+        const wait: PendingActionWait = {
+          sessionId: this.wsClient.getSessionId(),
+          stepNumber: this.currentStep,
+          resolve,
+          reject,
+          timeout: setTimeout(() => {
+            if (this.pendingActionWait !== wait) return;
+            this.pendingActionWait = null;
+            slog.warn({
+              module: 'LOOP_CONTROLLER',
+              event: 'ACTION_WAIT_TIMEOUT',
+              session_id: wait.sessionId || undefined,
+              step_number: wait.stepNumber,
+              error_code: 'ACTION_TIMEOUT',
+            });
             reject(new Error('Timed out waiting for agent action (300s)'));
-          }
-        }, 300000);
+          }, 300000),
+        };
+        this.pendingActionWait = wait;
       });
 
       this.wsClient.sendContextUpdate(sanitizedPayload);
@@ -692,7 +740,13 @@ export class LoopController {
 
   private finish(reason: SessionEndPayload['reason']): void {
     const finalStep = this.currentStep;
-    this.wsClient.sendSessionEnd(reason, finalStep);
+    try {
+      this.wsClient.sendSessionEnd(reason, finalStep);
+    } catch {
+      slog.warn({ module: 'LOOP_CONTROLLER', event: 'SESSION_END_SEND_FAILED', error_code: 'SESSION_END_SEND_FAILED' });
+    }
+    this.rejectPendingSession(new Error('Session finished'));
+    this.rejectPendingAction(new Error('Session finished'));
     this.wsClient.disconnect();
 
     if (reason === 'goal_achieved') {
@@ -700,6 +754,22 @@ export class LoopController {
     } else {
       this.transition('failed', { error: `Terminated with reason: ${reason}` });
     }
+  }
+
+  private rejectPendingSession(error: Error): void {
+    const wait = this.pendingSessionWait;
+    if (!wait) return;
+    this.pendingSessionWait = null;
+    clearTimeout(wait.timeout);
+    wait.reject(error);
+  }
+
+  private rejectPendingAction(error: Error): void {
+    const wait = this.pendingActionWait;
+    if (!wait) return;
+    this.pendingActionWait = null;
+    clearTimeout(wait.timeout);
+    wait.reject(error);
   }
 
   private transition(
