@@ -46,6 +46,22 @@ class MockVLMProvider(VLMProvider):
         step = context.step_number
         elements = context.sanitized_schema.elements
 
+        if context.sanitized_schema.title == "AEGIS Demo Form":
+            if step == 1:
+                target_id = "orgName"
+                return ActionObject(action_type="type", target=target_id, value="Acme Corp", reasoning="Entering organization name")
+            if step == 2:
+                target_id = "btnContinue1"
+                return ActionObject(action_type="click", target=target_id, reasoning="Clicking Continue")
+            if step == 3:
+                target_id = "acceptTerms"
+                return ActionObject(action_type="click", target=target_id, reasoning="Accepting terms")
+            if step == 4:
+                target_id = "btnContinue2"
+                return ActionObject(action_type="click", target=target_id, reasoning="Clicking Complete Setup")
+            return ActionObject(action_type="done", reasoning="Setup Complete!")
+
+        # 2. Default deterministic fallback (for Phase A walking skeleton tests)
         if step == 1:
             target_id = "el-search-input"
             for el in elements:

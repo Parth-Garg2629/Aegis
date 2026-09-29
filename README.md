@@ -188,6 +188,23 @@ The ML scripts under `ml/` (training, benchmarking, dataset generation, ONNX exp
 - Production deployment, hardened authentication, and broader threat testing remain future work.
 - Add verified screenshots and measured evaluation results so readers can assess the interface and privacy performance.
 
+## Future Roadmap
+
+The long-term vision for AEGIS goes beyond a single extension to become the foundational safety layer for all browser-based AI agents.
+
+- **Phase 1: Robust Local Inference & Expanded Heuristics**
+  - Implement full local vision models via WebGPU.
+  - Enhance zero-shot PII detection for varied languages and layouts.
+- **Phase 2: Agentic Sandbox Environment**
+  - Introduce an isolated runtime execution environment (sandbox) where potentially risky scripts can be simulated.
+  - Granular control over form submissions and API calls initiated by the agent.
+- **Phase 3: Cross-Tab & Multi-Step Reasoning**
+  - Safely pass context across tabs without compromising redaction boundaries.
+  - Long-horizon planning with persistent memory safely encrypted on disk.
+- **Phase 4: Enterprise Policy Management**
+  - Support managed device policies to enforce global redaction lists (e.g. internal IP ranges, proprietary terms).
+  - Centralized audit logs for SOC2 compliance.
+
 ## Further reading
 
 - [System architecture](docs/SYSTEM_ARCHITECTURE.md)
