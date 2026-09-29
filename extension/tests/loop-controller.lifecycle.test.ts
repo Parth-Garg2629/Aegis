@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionMessage, SanitizedSchema } from '@aegis/protocol';
+import type { SessionStateUpdateMessage } from '../src/background/bus';
 
 vi.mock('../src/background/capture', () => ({
   captureActiveTab: vi.fn(async () => ({
@@ -54,6 +55,8 @@ const schema: SanitizedSchema = {
     },
   ],
 };
+
+let contentScriptMissing = false;
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -145,6 +148,10 @@ function makeChromeApi() {
       query: vi.fn(async () => [{ id: 1 }]),
       sendMessage: vi.fn(async (_tabId: number, message: Record<string, any>) => {
         if (message.type === 'EXTRACT_DOM_REQUEST') {
+          if (contentScriptMissing) {
+            contentScriptMissing = false;
+            throw new Error('Could not establish connection. Receiving end does not exist.');
+          }
           return { type: 'EXTRACT_DOM_RESPONSE', schema, elementsCount: schema.elements.length, domSignals: [], piiSignals: [] };
         }
         if (message.type === 'EXECUTE_ACTION_REQUEST') {
@@ -178,8 +185,13 @@ function makeChromeApi() {
         throw new Error('Unexpected runtime message');
       }),
     },
+    scripting: {
+      executeScript: vi.fn(async () => []),
+    },
   };
 }
+
+let mockChromeApi: ReturnType<typeof makeChromeApi>;
 
 describe('LoopController lifecycle', () => {
   beforeEach(() => {
@@ -188,8 +200,10 @@ describe('LoopController lifecycle', () => {
     FakeWebSocket.failNextSession = false;
     FakeWebSocket.disconnectNextContext = false;
     FakeWebSocket.sendStaleActionNext = false;
+    contentScriptMissing = false;
     vi.stubGlobal('WebSocket', FakeWebSocket);
-    vi.stubGlobal('chrome', makeChromeApi());
+    mockChromeApi = makeChromeApi();
+    vi.stubGlobal('chrome', mockChromeApi);
   });
 
   afterEach(() => {
@@ -220,17 +234,35 @@ describe('LoopController lifecycle', () => {
 
   it('cleans up after failure so the same controller can start another session', async () => {
     vi.useFakeTimers();
-    const controller = new LoopController();
+    const updates: SessionStateUpdateMessage[] = [];
+    const controller = new LoopController({ onStateChange: (update) => updates.push(update) });
     FakeWebSocket.failNextSession = true;
 
     await controller.start('fail once');
+    await Promise.resolve();
     expect(controller.getState()).toBe('failed');
+    expect(updates.filter((update) => update.state === 'failed')).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
 
     await controller.start('start after failure');
     expect(controller.getState()).toBe('completed');
     expect(FakeWebSocket.instances[1].sessionId).not.toBe(FakeWebSocket.instances[0].sessionId);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('injects the content script once when an existing tab has no listener yet', async () => {
+    vi.useFakeTimers();
+    contentScriptMissing = true;
+    const controller = new LoopController();
+
+    await controller.start('run after extension load');
+
+    expect(controller.getState()).toBe('completed');
+    expect(mockChromeApi.scripting.executeScript).toHaveBeenCalledTimes(1);
+    expect(mockChromeApi.scripting.executeScript).toHaveBeenCalledWith({
+      target: { tabId: 1 },
+      files: ['content.js'],
+    });
   });
 
   it('settles a pending action wait on disconnect and permits a fresh session', async () => {

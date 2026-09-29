@@ -147,7 +147,7 @@ export class LoopController {
           this.pendingConfirmResolver = null;
           resolve(false);
         }
-        if (this.state !== 'completed' && this.state !== 'cancelled' && this.state !== 'idle') {
+        if (this.state !== 'completed' && this.state !== 'failed' && this.state !== 'cancelled' && this.state !== 'idle') {
           this.transition('failed', { error: 'WebSocket disconnected unexpectedly' });
         }
       },
@@ -251,10 +251,10 @@ export class LoopController {
         error_code: message.startsWith('E-') ? message : 'LOOP_START_FAILED',
       });
       if (this.wsClient.getSessionId()) {
-        this.finish('agent_failed');
+        this.finish('agent_failed', this.safeFailureCode(message));
       } else {
         this.wsClient.disconnect();
-        this.transition('failed', { error: message.startsWith('E-') ? message : 'Unable to start the agent session' });
+        this.transition('failed', { error: this.safeFailureCode(message) });
       }
     }
   }
@@ -381,13 +381,18 @@ export class LoopController {
         sanitizedPayload = buildResult.payload;
         
       } catch (err) {
+        const failureCode = err instanceof Error && err.message === 'Perception failed'
+          ? 'PERCEPTION_FAILED'
+          : err instanceof Error && err.message === 'Sanitization failed'
+            ? 'SANITIZATION_FAILED'
+            : 'CONTEXT_PREPARATION_FAILED';
         slog.error({
            module: 'LOOP_CONTROLLER',
            event: 'OFFSCREEN_PIPELINE_FAILED',
-           message: err instanceof Error ? err.message : String(err)
+           error_code: failureCode,
         });
         slog.error({ module: 'LOOP_CONTROLLER', event: 'FAIL_CLOSED', message: 'Sanitization failed. Cannot send data.' });
-        this.finish('agent_failed');
+        this.finish('agent_failed', failureCode);
         break;
       }
 
@@ -566,7 +571,7 @@ export class LoopController {
           error_message: action.reasoning || 'Agent marked task failed',
         };
         this.sendActionResultTracked(result);
-        this.finish('agent_failed');
+        this.finish('agent_failed', this.safeFailureCode(action.reasoning));
         break;
       }
 
@@ -662,9 +667,40 @@ export class LoopController {
       throw new Error('E-DOM-NO-ACTIVE-TAB');
     }
 
+    let extractionFailureCode = 'DOM_EXTRACTION_FAILED';
     try {
       const msg: ExtractDomRequestMessage = { type: 'EXTRACT_DOM_REQUEST' };
-      const response = (await chrome.tabs.sendMessage(this.activeTabId, msg)) as ExtractDomResponseMessage;
+      let response: ExtractDomResponseMessage;
+      try {
+        response = (await chrome.tabs.sendMessage(this.activeTabId, msg)) as ExtractDomResponseMessage;
+      } catch (err) {
+        const errorText = err instanceof Error ? err.message : '';
+        if (!errorText.includes('Receiving end does not exist')) throw err;
+
+        // The extension can be loaded after a tab is already open. Inject its
+        // declared content script once on demand, then retry DOM extraction.
+        slog.info({
+          module: 'LOOP_CONTROLLER',
+          event: 'CONTENT_SCRIPT_INJECTION_START',
+          session_id: this.wsClient.getSessionId() || undefined,
+          step_number: this.currentStep,
+          status: 'started',
+        });
+        try {
+          if (!chrome.scripting?.executeScript) throw new Error('Scripting API unavailable');
+          await chrome.scripting.executeScript({ target: { tabId: this.activeTabId }, files: ['content.js'] });
+          response = (await chrome.tabs.sendMessage(this.activeTabId, msg)) as ExtractDomResponseMessage;
+          slog.info({
+            module: 'LOOP_CONTROLLER',
+            event: 'CONTENT_SCRIPT_INJECTION_END',
+            session_id: this.wsClient.getSessionId() || undefined,
+            step_number: this.currentStep,
+            status: 'success',
+          });
+        } catch {
+          throw new Error('E-DOM-TAB-ACCESS-DENIED');
+        }
+      }
       if (response && response.schema) {
         slog.info({ module: 'LOOP_CONTROLLER', event: 'DOM_EXTRACTION_END', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, duration_ms: Math.round(performance.now() - startedAt), element_count: response.schema.elements.length, status: 'success', success: true });
         return {
@@ -675,11 +711,14 @@ export class LoopController {
       }
     } catch (err) {
       const errorText = err instanceof Error ? err.message : '';
-      const errorCode = errorText.includes('Receiving end does not exist')
+      const errorCode = errorText === 'E-DOM-TAB-ACCESS-DENIED'
+        ? 'TAB_ACCESS_DENIED'
+        : errorText.includes('Receiving end does not exist')
         ? 'NO_CONTENT_SCRIPT'
         : errorText.includes('Cannot access contents')
           ? 'TAB_ACCESS_DENIED'
           : 'DOM_EXTRACTION_API_ERROR';
+      extractionFailureCode = errorCode;
       slog.warn({
         module: 'LOOP_CONTROLLER',
         event: 'EXTRACT_DOM_FAILED',
@@ -689,7 +728,7 @@ export class LoopController {
     }
 
     slog.error({ module: 'LOOP_CONTROLLER', event: 'DOM_EXTRACTION_ERROR', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, duration_ms: Math.round(performance.now() - startedAt), element_count: 0, error_code: 'DOM_EXTRACTION_FAILED', status: 'error', success: false });
-    throw new Error('E-DOM-EXTRACTION-FAILED');
+    throw new Error(`E-${extractionFailureCode}`);
   }
 
 
@@ -738,7 +777,24 @@ export class LoopController {
     };
   }
 
-  private finish(reason: SessionEndPayload['reason']): void {
+  private safeFailureCode(reason?: string | null): string {
+    if (!reason) return 'AGENT_ACTION_FAILED';
+    const protocolCode = reason.match(/\bE-[A-Z0-9-]+\b/);
+    if (protocolCode) return protocolCode[0];
+    if (reason.includes('VLM timeout')) return 'VLM_TIMEOUT';
+    if (reason.includes('Could not connect to local Ollama')) return 'OLLAMA_CONNECTION_FAILED';
+    if (reason.includes('VLM HTTP request failed')) return 'OLLAMA_HTTP_FAILED';
+    if (reason.includes('could not be safely parsed')) return 'VLM_RESPONSE_INVALID';
+    if (reason.includes('valid browser action')) return 'VLM_ACTION_INVALID';
+    if (reason.includes('Action validation failed')) return 'ACTION_VALIDATION_FAILED';
+    if (reason.includes('Action blocked by risk engine')) return 'ACTION_BLOCKED';
+    if (reason.includes('VLM generation failed')) return 'VLM_GENERATION_FAILED';
+    if (reason === 'Perception failed') return 'PERCEPTION_FAILED';
+    if (reason === 'Sanitization failed') return 'SANITIZATION_FAILED';
+    return 'AGENT_ACTION_FAILED';
+  }
+
+  private finish(reason: SessionEndPayload['reason'], errorCode?: string): void {
     const finalStep = this.currentStep;
     try {
       this.wsClient.sendSessionEnd(reason, finalStep);
@@ -752,7 +808,11 @@ export class LoopController {
     if (reason === 'goal_achieved') {
       this.transition('completed');
     } else {
-      this.transition('failed', { error: `Terminated with reason: ${reason}` });
+      this.transition('failed', {
+        error: errorCode
+          ? `Terminated with reason: ${reason} (${errorCode})`
+          : `Terminated with reason: ${reason}`,
+      });
     }
   }
 
