@@ -97,6 +97,7 @@ export class LoopController {
         }
       },
       onAction: (msg: ActionMessage) => {
+        slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_RECEIVED', session_id: msg.session_id, step_number: msg.payload.step_number, action_type: msg.payload.action.action_type, correlation_id: `${msg.session_id}:${msg.payload.step_number}` });
         if (this.pendingActionResolver) {
           this.pendingActionResolver(msg.payload.action);
           this.pendingActionResolver = null;
@@ -212,13 +213,17 @@ export class LoopController {
       await this.runLoop();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error('[LOOP_START_FAILED ERROR]', err);
       slog.error({
         module: 'LOOP_CONTROLLER',
         event: 'LOOP_START_FAILED',
-        message,
+        error_code: message.startsWith('E-') ? message : 'LOOP_START_FAILED',
       });
-      this.transition('failed', { error: message });
+      if (this.wsClient.getSessionId()) {
+        this.finish('agent_failed');
+      } else {
+        this.wsClient.disconnect();
+        this.transition('failed', { error: message.startsWith('E-') ? message : 'Unable to start the agent session' });
+      }
     }
   }
 
@@ -257,12 +262,14 @@ export class LoopController {
 
       slog.info({
         module: 'LOOP_CONTROLLER',
-        event: 'STEP_CYCLE_START',
+        event: 'NEXT_CYCLE_START',
         step_number: this.currentStep,
+        session_id: this.wsClient.getSessionId() || undefined,
+        correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`,
       });
 
       this.transition('capturing');
-      const captureResult = await captureActiveTab(this.activeTabId || undefined);
+      const captureResult = await captureActiveTab(this.activeTabId || undefined, this.wsClient.getSessionId() || undefined, this.currentStep);
 
       const { schema: domSchema, domSignals, piiSignals } = await this.extractDomFromActiveTab();
 
@@ -282,6 +289,8 @@ export class LoopController {
       
       try {
         // Run Perception Cycle (Offscreen)
+        const perceptionStartedAt = performance.now();
+        slog.info({ module: 'LOOP_CONTROLLER', event: 'OFFSCREEN_PERCEPTION_START', step_number: this.currentStep, status: 'started' });
         await ensureOffscreenDocument();
         const perceptionMsg = {
           type: 'RUN_PERCEPTION_CYCLE',
@@ -291,7 +300,15 @@ export class LoopController {
           domSignals,
           piiSignals
         };
-        const perceptionResult = await sendMessageWithRetry(perceptionMsg);
+        let perceptionResult: any;
+        try {
+          perceptionResult = await sendMessageWithRetry(perceptionMsg);
+          if (!perceptionResult) throw new Error('empty response');
+          slog.info({ module: 'LOOP_CONTROLLER', event: 'OFFSCREEN_PERCEPTION_END', step_number: this.currentStep, duration_ms: Math.round(performance.now() - perceptionStartedAt), status: 'success', success: true });
+        } catch {
+          slog.error({ module: 'LOOP_CONTROLLER', event: 'OFFSCREEN_PERCEPTION_ERROR', step_number: this.currentStep, duration_ms: Math.round(performance.now() - perceptionStartedAt), error_code: 'PERCEPTION_FAILED', status: 'error', success: false });
+          throw new Error('Perception failed');
+        }
         
         if (!perceptionResult) {
             throw new Error('Perception cycle returned null');
@@ -311,10 +328,16 @@ export class LoopController {
             previousActionResult: this.previousResult
           }
         };
-        const buildResult = await sendMessageWithRetry(buildMsg);
-        
-        if (!buildResult || !buildResult.success) {
-            throw new Error(buildResult?.error || 'Build context failed');
+        const sanitizeStartedAt = performance.now();
+        slog.info({ module: 'LOOP_CONTROLLER', event: 'SANITIZATION_START', step_number: this.currentStep, status: 'started' });
+        let buildResult: any;
+        try {
+          buildResult = await sendMessageWithRetry(buildMsg);
+          if (!buildResult || !buildResult.success) throw new Error('sanitization response failed');
+          slog.info({ module: 'LOOP_CONTROLLER', event: 'SANITIZATION_END', step_number: this.currentStep, duration_ms: Math.round(performance.now() - sanitizeStartedAt), status: 'success', success: true });
+        } catch {
+          slog.error({ module: 'LOOP_CONTROLLER', event: 'SANITIZATION_ERROR', step_number: this.currentStep, duration_ms: Math.round(performance.now() - sanitizeStartedAt), error_code: 'SANITIZATION_FAILED', status: 'error', success: false });
+          throw new Error('Sanitization failed');
         }
         
         sanitizedPayload = buildResult.payload;
@@ -326,7 +349,7 @@ export class LoopController {
            message: err instanceof Error ? err.message : String(err)
         });
         slog.error({ module: 'LOOP_CONTROLLER', event: 'FAIL_CLOSED', message: 'Sanitization failed. Cannot send data.' });
-        this.transition('failed', { error: 'Sanitization failed' });
+        this.finish('agent_failed');
         break;
       }
 
@@ -344,20 +367,15 @@ export class LoopController {
       });
 
       this.wsClient.sendContextUpdate(sanitizedPayload);
+      slog.info({ module: 'LOOP_CONTROLLER', event: 'CONTEXT_UPDATE_SEND', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, status: 'sent' });
       const action = await actionPromise;
-
-      slog.info({
-        module: 'LOOP_CONTROLLER',
-        event: 'ACTION_RECEIVED',
-        step_number: this.currentStep,
-        action_type: action.action_type,
-      });
 
       // ── Client-side validation ─────────────────────────────────────────────
       const validation = validateAction(action);
+      slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_VALIDATION_DECISION', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, action_type: action.action_type, status: validation.valid ? 'valid' : 'invalid', error_code: validation.valid ? undefined : 'ACTION_INVALID' });
       if (!validation.valid) {
         slog.error({ module: 'LOOP_CONTROLLER', event: 'ACTION_VALIDATION_FAILED', message: validation.error });
-        this.wsClient.sendActionResult({
+        this.sendActionResultTracked({
           step_number: this.currentStep,
           action_type: action.action_type || 'unknown',
           success: false,
@@ -370,6 +388,7 @@ export class LoopController {
 
       // ── Client-side risk evaluation ────────────────────────────────────────
       const risk = evaluateActionRisk(action, domSchema);
+      slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_RISK_DECISION', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, action_type: action.action_type, risk_category: risk.matchedCategory, status: risk.level });
 
       if (risk.level === 'blocked') {
         // BLOCKED: fail closed immediately — no confirmation, no execution
@@ -446,7 +465,7 @@ export class LoopController {
             reason: liveValidation.reason,
             step: this.currentStep,
           });
-          this.wsClient.sendActionResult({
+          this.sendActionResultTracked({
             step_number: this.currentStep,
             action_type: action.action_type,
             success: false,
@@ -466,18 +485,27 @@ export class LoopController {
       }
 
       // ── Terminal actions (done / fail) ─────────────────────────────────────
-      this.transition('executing', {
-        lastAction: action.action_type,
-        reasoning: action.reasoning || undefined,
-      });
+      this.transition('executing', { lastAction: action.action_type });
 
       if (action.action_type === 'done') {
+        if (!this.previousResult?.success) {
+          const result: ActionResultPayload = {
+            step_number: this.currentStep,
+            action_type: 'done',
+            success: false,
+            error_code: 'E-COMPLETION-UNVERIFIED',
+            error_message: 'No successful browser action preceded completion',
+          };
+          this.sendActionResultTracked(result);
+          this.finish('agent_failed');
+          break;
+        }
         const result: ActionResultPayload = {
           step_number: this.currentStep,
           action_type: 'done',
           success: true,
         };
-        this.wsClient.sendActionResult(result);
+        this.sendActionResultTracked(result);
         this.finish('goal_achieved');
         break;
       }
@@ -489,16 +517,19 @@ export class LoopController {
           success: false,
           error_message: action.reasoning || 'Agent marked task failed',
         };
-        this.wsClient.sendActionResult(result);
+        this.sendActionResultTracked(result);
         this.finish('agent_failed');
         break;
       }
 
       // ── Execute ────────────────────────────────────────────────────────────
+      const executionStartedAt = performance.now();
+      slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_EXECUTION_START', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, action_type: action.action_type, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, status: 'started' });
       const executionResult = await this.executeActionInActiveTab(action);
+      slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_EXECUTION_END', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, action_type: action.action_type, duration_ms: Math.round(performance.now() - executionStartedAt), success: executionResult.success, error_code: executionResult.error_code, status: executionResult.success ? 'success' : 'failed' });
       this.previousResult = executionResult;
 
-      this.wsClient.sendActionResult(executionResult);
+      this.sendActionResultTracked(executionResult);
 
       slog.info({
         module: 'LOOP_CONTROLLER',
@@ -506,6 +537,11 @@ export class LoopController {
         step_number: this.currentStep,
         success: executionResult.success,
       });
+
+      if (!executionResult.success) {
+        this.finish('agent_failed');
+        break;
+      }
 
       this.currentStep++;
     }
@@ -565,15 +601,24 @@ export class LoopController {
     return { valid: true, reason: '' };
   }
 
+  private sendActionResultTracked(result: ActionResultPayload): void {
+    slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_RESULT_SEND', session_id: this.wsClient.getSessionId() || undefined, step_number: result.step_number, action_type: result.action_type, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${result.step_number}`, success: result.success, error_code: result.error_code, status: 'sending' });
+    this.wsClient.sendActionResult(result);
+  }
+
   private async extractDomFromActiveTab(): Promise<{ schema: SanitizedSchema; domSignals: any[]; piiSignals: any[] }> {
+    const startedAt = performance.now();
+    slog.info({ module: 'LOOP_CONTROLLER', event: 'DOM_EXTRACTION_START', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, status: 'started' });
     if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs) {
-      return { schema: { url: 'http://localhost/fixtures/fp_01.html', title: 'FP-01 Fixture', elements: [] } as any, domSignals: [], piiSignals: [] };
+      slog.error({ module: 'LOOP_CONTROLLER', event: 'DOM_EXTRACTION_END', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, duration_ms: Math.round(performance.now() - startedAt), element_count: 0, error_code: 'NO_ACTIVE_TAB', status: 'error' });
+      throw new Error('E-DOM-NO-ACTIVE-TAB');
     }
 
     try {
       const msg: ExtractDomRequestMessage = { type: 'EXTRACT_DOM_REQUEST' };
       const response = (await chrome.tabs.sendMessage(this.activeTabId, msg)) as ExtractDomResponseMessage;
       if (response && response.schema) {
+        slog.info({ module: 'LOOP_CONTROLLER', event: 'DOM_EXTRACTION_END', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, duration_ms: Math.round(performance.now() - startedAt), element_count: response.schema.elements.length, status: 'success', success: true });
         return {
            schema: response.schema,
            domSignals: response.domSignals || [],
@@ -581,14 +626,22 @@ export class LoopController {
         };
       }
     } catch (err) {
+      const errorText = err instanceof Error ? err.message : '';
+      const errorCode = errorText.includes('Receiving end does not exist')
+        ? 'NO_CONTENT_SCRIPT'
+        : errorText.includes('Cannot access contents')
+          ? 'TAB_ACCESS_DENIED'
+          : 'DOM_EXTRACTION_API_ERROR';
       slog.warn({
         module: 'LOOP_CONTROLLER',
         event: 'EXTRACT_DOM_FAILED',
-        message: err instanceof Error ? err.message : String(err),
+        error_code: errorCode,
+        status: 'error',
       });
     }
 
-    return { schema: { url: 'http://localhost/fixtures/fp_01.html', title: 'FP-01 Fixture', elements: [] } as any, domSignals: [], piiSignals: [] };
+    slog.error({ module: 'LOOP_CONTROLLER', event: 'DOM_EXTRACTION_ERROR', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, duration_ms: Math.round(performance.now() - startedAt), element_count: 0, error_code: 'DOM_EXTRACTION_FAILED', status: 'error', success: false });
+    throw new Error('E-DOM-EXTRACTION-FAILED');
   }
 
 
@@ -597,7 +650,9 @@ export class LoopController {
       return {
         step_number: this.currentStep,
         action_type: action.action_type,
-        success: true,
+        success: false,
+        error_code: 'E-EXEC-03',
+        error_message: 'No active browser tab is available for execution',
       };
     }
 
@@ -629,7 +684,9 @@ export class LoopController {
     return {
       step_number: this.currentStep,
       action_type: action.action_type,
-      success: true,
+      success: false,
+      error_code: 'E-EXEC-03',
+      error_message: 'Content script did not return an execution result',
     };
   }
 

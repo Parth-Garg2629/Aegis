@@ -141,7 +141,7 @@ function updateUI(update: SessionStateUpdateMessage): void {
 
   // Log entry for action changes
   if (update.lastAction && state !== 'confirming') {
-    addLog(`Action: ${update.lastAction}${update.reasoning ? ` — ${update.reasoning.slice(0, 60)}` : ''}`, 'action');
+    addLog(`Action: ${update.lastAction}`, 'action');
   }
 
   if (state === 'confirming' && update.lastAction) {

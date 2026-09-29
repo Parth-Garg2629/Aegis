@@ -62,8 +62,8 @@ export class AegisWebSocketClient {
           this.isConnecting = false;
           slog.info({
             module: 'WS_CLIENT',
-            event: 'WS_CONNECTED',
-            url: this.serverUrl,
+            event: 'WEBSOCKET_OPEN',
+            status: 'open',
           });
           resolve();
         };
@@ -76,8 +76,9 @@ export class AegisWebSocketClient {
           this.isConnecting = false;
           slog.error({
             module: 'WS_CLIENT',
-            event: 'WS_ERROR',
-            message: 'WebSocket connection error',
+            event: 'WEBSOCKET_ERROR',
+            error_code: 'WS_CONNECT_ERROR',
+            status: 'error',
           });
           reject(err);
         };
@@ -87,9 +88,10 @@ export class AegisWebSocketClient {
           this.isConnecting = false;
           slog.info({
             module: 'WS_CLIENT',
-            event: 'WS_DISCONNECTED',
-            code: event.code,
-            reason: event.reason,
+            event: 'WEBSOCKET_CLOSE',
+            error_code: event.code ? `WS_CLOSE_${event.code}` : 'WS_CLOSE_UNKNOWN',
+            status: 'closed',
+            session_id: this.sessionId || undefined,
           });
           this.callbacks.onClose?.(event.code, event.reason);
         };

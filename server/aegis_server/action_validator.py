@@ -66,34 +66,10 @@ class ActionValidator:
 
             valid_targets = {el.id for el in context.sanitized_schema.elements}
             if action.target not in valid_targets:
-                # Fallback: model might have output the label or text instead of the ID.
-                resolved = False
-                target_lower = action.target.lower().strip()
-                for el in context.sanitized_schema.elements:
-                    if (el.label and target_lower in el.label.lower().strip()) or \
-                       (el.text and target_lower in el.text.lower().strip()):
-                        action.target = el.id
-                        resolved = True
-                        break
-                if not resolved:
-                    # Extreme fallback for tiny models hallucinating targets
-                    if action.action_type == "type":
-                        inputs = [el for el in context.sanitized_schema.elements if el.tagName.lower() in ["textarea", "input"]]
-                        if inputs:
-                            # Sort by area (width * height) to skip hidden 1x1 pixel tracking inputs
-                            inputs.sort(key=lambda e: (e.boundingBox.w * e.boundingBox.h) if e.boundingBox else 0, reverse=True)
-                            action.target = inputs[0].id
-                            resolved = True
-                    elif action.action_type == "click":
-                        clickables = [el for el in context.sanitized_schema.elements if el.tagName.lower() in ["button", "a", "input"]]
-                        if clickables:
-                            action.target = clickables[0].id
-                            resolved = True
-
-                if not resolved and len(context.sanitized_schema.elements) > 0:
-                    # Final guarantee: just pick the first element so frontend doesn't fail
-                    action.target = context.sanitized_schema.elements[0].id
-                    resolved = True
+                # A target is a capability reference created by the content
+                # script. Never substitute a label or arbitrary element when a
+                # model returns an unknown ID.
+                return ValidationResult(False, "E-VAL-02", "Action target is not present in the sanitized schema")
 
         # 4. Value safety check (script injection)
         if action.value is not None:

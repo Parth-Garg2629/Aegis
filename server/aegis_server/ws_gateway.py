@@ -45,7 +45,7 @@ from aegis_server.orchestrator import orchestrator
 from aegis_server.providers import get_configured_provider
 from aegis_server.session import session_manager, SessionState
 from aegis_server.audit_db import audit_db
-from aegis_server.slog import slog
+from aegis_server.slog import slog, set_correlation_id, reset_correlation_id
 
 # ── Constants ────────────────────────────────────────────────────────────────
 MAX_MESSAGE_BYTES: int = 2 * 1024 * 1024   # 2 MB
@@ -322,6 +322,8 @@ async def handle_websocket_connection(
                     await websocket.send_text(err.model_dump_json())
                     continue
 
+                slog.info(module="WS_GATEWAY", event="CONTEXT_UPDATE_RECEIVED", session_id=ctx_msg.session_id, step_number=ctx_msg.payload.step_number, status="received")
+
                 # ── Step counting: Enforce server-side max_steps ─────────────
                 if ctx_msg.payload.step_number > session.max_steps:
                     err = _make_error(
@@ -355,6 +357,9 @@ async def handle_websocket_connection(
                     continue
 
                 # ── VLM with timeout ──────────────────────────────────────────
+                correlation_token = set_correlation_id(f"{ctx_msg.session_id}:{ctx_msg.payload.step_number}")
+                provider_started_at = asyncio.get_running_loop().time()
+                slog.info(module="WS_GATEWAY", event="PROVIDER_START", session_id=ctx_msg.session_id, step_number=ctx_msg.payload.step_number, attempt_number=1, status="started")
                 try:
                     action, risk_assessment = await asyncio.wait_for(
                         asyncio.to_thread(
@@ -365,8 +370,10 @@ async def handle_websocket_connection(
                     # Now that the orchestrator is purely an engine, the gateway handles session data updates
                     session.update_context(ctx_msg.payload)
                     session.record_action(action)
+                    slog.info(module="WS_GATEWAY", event="PROVIDER_END", session_id=ctx_msg.session_id, step_number=ctx_msg.payload.step_number, attempt_number=1, duration_ms=round((asyncio.get_running_loop().time() - provider_started_at) * 1000), action_type=action.action_type, status="success", success=True)
                     
                 except asyncio.TimeoutError:
+                    slog.error(module="WS_GATEWAY", event="PROVIDER_TIMEOUT", session_id=ctx_msg.session_id, step_number=ctx_msg.payload.step_number, attempt_number=1, duration_ms=round((asyncio.get_running_loop().time() - provider_started_at) * 1000), error_code="PROVIDER_TIMEOUT", status="timeout", success=False)
                     slog.warn(
                         module="WS_GATEWAY",
                         event="VLM_TIMEOUT",
@@ -383,6 +390,7 @@ async def handle_websocket_connection(
                     await websocket.send_text(err.model_dump_json())
                     continue
                 except Exception:
+                    slog.error(module="WS_GATEWAY", event="PROVIDER_ERROR", session_id=ctx_msg.session_id, step_number=ctx_msg.payload.step_number, attempt_number=1, duration_ms=round((asyncio.get_running_loop().time() - provider_started_at) * 1000), error_code="PROVIDER_ERROR", status="error", success=False)
                     err = _make_error(
                         ctx_msg.session_id,
                         "E-SRV-04",
@@ -392,6 +400,8 @@ async def handle_websocket_connection(
                     )
                     await websocket.send_text(err.model_dump_json())
                     continue
+                finally:
+                    reset_correlation_id(correlation_token)
 
                 action_msg = ActionMessage(
                     session_id=session.session_id,
@@ -402,6 +412,7 @@ async def handle_websocket_connection(
                         risk_assessment=risk_assessment
                     ),
                 )
+                slog.info(module="WS_GATEWAY", event="ACTION_SEND", session_id=ctx_msg.session_id, step_number=ctx_msg.payload.step_number, action_type=action.action_type, correlation_id=f"{ctx_msg.session_id}:{ctx_msg.payload.step_number}", status="sending")
                 await websocket.send_text(action_msg.model_dump_json())
 
             # ── action_result ─────────────────────────────────────────────────
@@ -413,8 +424,11 @@ async def handle_websocket_connection(
                         event="ACTION_RESULT_RECEIVED",
                         session_id=result_msg.session_id,
                         step_number=result_msg.payload.step_number,
+                        correlation_id=f"{result_msg.session_id}:{result_msg.payload.step_number}",
+                        error_code=result_msg.payload.error_code,
                         success=result_msg.payload.success,
                         action_type=result_msg.payload.action_type,
+                        status="received",
                     )
                 except Exception:
                     slog.warn(
@@ -533,3 +547,5 @@ async def handle_websocket_connection(
             event="WEBSOCKET_EXCEPTION",
             session_id=current_session_id or "unknown",
         )
+    finally:
+        slog.info(module="WS_GATEWAY", event="WEBSOCKET_CLOSE", session_id=current_session_id or "unknown", status="closed")

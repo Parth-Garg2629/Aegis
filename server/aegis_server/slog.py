@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import json
 import sys
 from typing import Any, Callable, Dict, Optional
+from contextvars import ContextVar
 
 ALLOWED_LOG_FIELDS = {
     "timestamp",
@@ -21,6 +22,13 @@ ALLOWED_LOG_FIELDS = {
     "sanitized_count",
     "success",
     "reason",
+    "element_count",
+    "screenshot_width",
+    "screenshot_height",
+    "dpr",
+    "attempt_number",
+    "correlation_id",
+    "restart_count",
 }
 
 LogSink = Callable[[Dict[str, Any]], None]
@@ -37,6 +45,15 @@ def _default_sink(entry: Dict[str, Any]) -> None:
 
 
 _current_sink: LogSink = _default_sink
+_correlation_id: ContextVar[Optional[str]] = ContextVar("aegis_correlation_id", default=None)
+
+
+def set_correlation_id(value: str):
+    return _correlation_id.set(value)
+
+
+def reset_correlation_id(token) -> None:
+    _correlation_id.reset(token)
 
 
 def set_log_sink(sink: LogSink) -> None:
@@ -57,6 +74,7 @@ def filter_safe_fields(entry: Dict[str, Any]) -> Dict[str, Any]:
 class SafeLogger:
     @staticmethod
     def log(level: str, module: str, event: str, **kwargs: Any) -> Dict[str, Any]:
+        kwargs.setdefault("correlation_id", _correlation_id.get())
         raw = {"level": level, "module": module, "event": event, **kwargs}
         safe = filter_safe_fields(raw)
         _current_sink(safe)

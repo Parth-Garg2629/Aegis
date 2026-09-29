@@ -124,12 +124,10 @@ export default defineConfig({
         popup: resolve(__dirname, 'src/ui/popup/popup.html'),
         offscreen: resolve(__dirname, 'src/offscreen/offscreen.html'),
         sw: resolve(__dirname, 'src/background/sw.ts'),
-        content: resolve(__dirname, 'src/content/extractor.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'sw') return 'sw.js';
-          if (chunkInfo.name === 'content') return 'content.js';
           return '[name].js';
         },
         chunkFileNames: 'chunks/[name]-[hash].js',

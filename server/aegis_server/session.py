@@ -16,6 +16,7 @@ from typing import Deque, Dict, List, Optional
 import uuid
 
 from aegis_server.protocol import ClientMetadata, ContextUpdatePayload, ActionObject
+from aegis_server.slog import slog
 
 
 class SessionState(str, Enum):
@@ -88,6 +89,7 @@ class Session:
             )
         
         self.state = new_state
+        slog.info(module="SESSION", event="SESSION_STATE_TRANSITION", session_id=self.session_id, step_number=self.current_step, status=new_state.value)
 
     @property
     def goal(self) -> str:

@@ -16,6 +16,13 @@ export const ALLOWED_LOG_FIELDS = new Set([
   'sanitized_count',
   'success',
   'reason',
+  'element_count',
+  'screenshot_width',
+  'screenshot_height',
+  'dpr',
+  'attempt_number',
+  'correlation_id',
+  'restart_count',
 ]);
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -37,6 +44,13 @@ export interface SafeLogEntry {
   sanitized_count?: number;
   success?: boolean;
   reason?: string;
+  element_count?: number;
+  screenshot_width?: number;
+  screenshot_height?: number;
+  dpr?: number;
+  attempt_number?: number;
+  correlation_id?: string;
+  restart_count?: number;
   [key: string]: unknown;
 }
 

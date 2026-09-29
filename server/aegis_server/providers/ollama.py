@@ -18,6 +18,7 @@ Design goals:
 import json
 import os
 import re
+import time
 from typing import List, Optional, Dict, Any, Tuple
 
 import httpx
@@ -244,7 +245,7 @@ class OllamaProvider(VLMProvider):
     # OLLAMA HTTP CALL
     # ------------------------------------------------------------------
 
-    def _call_ollama(
+    def _call_ollama_request(
         self,
         payload: Dict[str, Any],
     ) -> Tuple[bool, ActionObject]:
@@ -311,7 +312,6 @@ class OllamaProvider(VLMProvider):
             # JSON extraction
             # ----------------------------------------------------------
 
-            slog.error(module="OLLAMA", event="DEBUG_RAW_CONTENT", reason=repr(content)[:1000])
             parsed = self._extract_json_object(content)
 
             if parsed is None:
@@ -495,7 +495,7 @@ class OllamaProvider(VLMProvider):
         # First attempt
         # --------------------------------------------------------------
 
-        success, action = self._call_ollama(payload)
+        success, action = self._call_ollama(payload, context.step_number, 1)
 
         if success:
             return action
@@ -510,7 +510,7 @@ class OllamaProvider(VLMProvider):
             step=context.step_number,
         )
 
-        success, action = self._call_ollama(payload)
+        success, action = self._call_ollama(payload, context.step_number, 2)
 
         if success:
             return action
@@ -521,8 +521,15 @@ class OllamaProvider(VLMProvider):
 
         return ActionObject(
             action_type="fail",
-            reasoning="VLM failed to produce a valid browser action.",
+            reasoning=action.reasoning or "VLM failed to produce a valid browser action.",
         )
+
+    def _call_ollama(self, payload: Dict[str, Any], step_number: int, attempt_number: int) -> Tuple[bool, ActionObject]:
+        started_at = time.perf_counter()
+        slog.info(module="OLLAMA", event="PROVIDER_ATTEMPT_START", step_number=step_number, attempt_number=attempt_number, model_name=self.model_name, status="started")
+        success, action = self._call_ollama_request(payload)
+        slog.info(module="OLLAMA", event="PROVIDER_ATTEMPT_END", step_number=step_number, attempt_number=attempt_number, model_name=self.model_name, duration_ms=round((time.perf_counter() - started_at) * 1000), status="success" if success else "failed", success=success, error_code=None if success else "PROVIDER_ATTEMPT_FAILED")
+        return success, action
 
 
 # ----------------------------------------------------------------------
