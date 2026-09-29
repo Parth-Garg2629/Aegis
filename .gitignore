@@ -1,37 +1,60 @@
 node_modules/
 .pnpm-store/
 
+# Build & Output
 dist/
 build/
+out/
 *.tsbuildinfo
 .tsbuild/
+*.crx
+*.zip
 
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.pytype/
 venv/
 .venv/
 env/
+ENV/
 *.egg-info/
+pip-wheel-metadata/
 
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs & Temp
 *.log
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 .tmp/
 temp/
+scratch/
 
+# Environment Variables & Secrets
 .env
-.env.local
-*.local
+.env.*
+!.env.example
 
+# IDE & OS
 .vscode/
 .idea/
+.vs/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
 
+# Testing & Eval
 eval/runs/
 test-results/
 playwright-report/
@@ -41,6 +64,7 @@ coverage/
 .coverage
 htmlcov/
 
+# ML Models & Datasets
 ml/dataset/
 ml/checkpoints/
 ml/train_log.txt
@@ -48,4 +72,9 @@ ml/train_log.txt
 *.pth
 *.ckpt
 *.safetensors
+*.onnx
+*.onnx_data
+*.bin
+*.tflite
+
 
