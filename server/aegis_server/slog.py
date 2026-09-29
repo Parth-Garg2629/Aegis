@@ -17,6 +17,7 @@ ALLOWED_LOG_FIELDS = {
     "duration_ms",
     "element_id",
     "status",
+    "status_code",
     "target_url_origin",
     "model_name",
     "sanitized_count",
