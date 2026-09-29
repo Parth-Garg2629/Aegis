@@ -86,7 +86,7 @@ VLM_PROVIDER=mock python -m uvicorn aegis_server.main:app --app-dir server --hos
 Set up and start the Python service in a second terminal:
 
 ```powershell
-py -3.11 -m venv .venv
+py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 $env:VLM_PROVIDER = "mock"
@@ -131,6 +131,14 @@ The extension connects to `ws://127.0.0.1:8765/ws`. Build it, then load `extensi
 5. Stop or cancel the run from the extension popup.
 
 The mock provider is intended for development and scripted flows. Use Ollama for model-driven task reasoning.
+
+## Troubleshooting
+
+- The backend serves its health check at `http://127.0.0.1:8765/health`. A `404` at `/` is expected; there is no web page at the root URL.
+- For Ollama-backed runs, keep the Ollama service running and confirm the model is installed with `ollama list`. Start or restart the AEGIS backend after setting `VLM_PROVIDER`, `OLLAMA_BASE_URL`, and `OLLAMA_MODEL`.
+- If the popup reports `OLLAMA_HTTP_FAILED`, inspect the backend terminal for the `OLLAMA` / `HTTP_ERROR` log entry and its numeric `status_code`. The logger omits prompts, page content, screenshots, and raw model output.
+- If a later Start click appears to do nothing, inspect the extension service worker console for `SESSION_START_REQUESTED`, `WEBSOCKET_OPEN`, and `NEXT_CYCLE_START`, and check the backend for `SESSION_INITIALIZED` and `CONTEXT_UPDATE_RECEIVED`. These event names help distinguish a popup/worker handoff issue from a provider request failure.
+- After rebuilding the extension, click **Reload** for the unpacked extension in `chrome://extensions`, then refresh the target page so Chrome injects the rebuilt content script.
 
 ## Screenshots and demo
 
