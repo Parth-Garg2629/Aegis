@@ -8,6 +8,7 @@ and generating actions.
 import re
 from typing import Optional, Tuple
 from datetime import datetime, timezone
+from urllib.parse import unquote_plus
 from aegis_server.protocol import ActionObject, ContextUpdatePayload, RiskAssessment
 from aegis_server.providers import VLMProvider, get_configured_provider
 from aegis_server.session import Session, SessionState
@@ -75,6 +76,36 @@ def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[Actio
     return None
 
 
+def _search_completion_action(
+    goal: str, context: ContextUpdatePayload
+) -> Optional[ActionObject]:
+    """Finish a search-only goal after a successful search reaches its results page."""
+    match = _SEARCH_GOAL.match(goal)
+    previous = context.previous_action_result
+    if not match or not previous or not previous.success or previous.action_type != "type":
+        return None
+
+    # A goal that asks to open or visit a result still has work after searching.
+    raw_query = match.group(1)
+    if _SEARCH_GOAL_FOLLOW_UP.search(raw_query):
+        return None
+    query = raw_query.strip().strip(" \t\r\n\"'`.,!?;:")
+    if not query:
+        return None
+
+    normalize = lambda value: re.sub(r"\W+", " ", value.casefold()).strip()
+    normalized_query = normalize(query)
+    page_text = normalize(unquote_plus(context.sanitized_schema.url)) + " " + normalize(
+        context.sanitized_schema.title
+    )
+    if normalized_query and normalized_query in page_text:
+        return ActionObject(
+            action_type="done",
+            reasoning="The requested search results are visible.",
+        )
+    return None
+
+
 class AgentOrchestrator:
     def __init__(self, provider: Optional[VLMProvider] = None):
         if provider is None:
@@ -98,12 +129,23 @@ class AgentOrchestrator:
             if session.current_step > session.max_steps:
                 return ActionObject(action_type="fail", reasoning="Maximum steps reached"), None
 
-            # 2. Call VLM
-            action = self.provider.generate_action(
-                context, 
-                goal=session.goal,
-                action_history=list(session.action_history)
-            )
+            # Finish search-only goals when the previous search submission
+            # succeeded and the current page identifies the requested results.
+            action = _search_completion_action(session.goal, context)
+            if action:
+                slog.info(
+                    module="ORCHESTRATOR",
+                    event="SEARCH_GOAL_COMPLETED",
+                    session_id=session.session_id,
+                    step_number=context.step_number,
+                )
+            else:
+                # 2. Call VLM
+                action = self.provider.generate_action(
+                    context,
+                    goal=session.goal,
+                    action_history=list(session.action_history)
+                )
 
             if action.action_type == "fail":
                 fallback = _search_fallback(session.goal, context)
