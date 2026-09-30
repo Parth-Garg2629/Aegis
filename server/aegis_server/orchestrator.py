@@ -5,6 +5,7 @@ Engine loop managing VLM calls, session state transitions,
 and generating actions.
 """
 
+import re
 from typing import Optional, Tuple
 from datetime import datetime, timezone
 from aegis_server.protocol import ActionObject, ContextUpdatePayload, RiskAssessment
@@ -12,6 +13,66 @@ from aegis_server.providers import VLMProvider, get_configured_provider
 from aegis_server.session import Session, SessionState
 from aegis_server.slog import slog
 from aegis_server.audit_db import audit_db
+
+
+_SEARCH_GOAL = re.compile(
+    r"^\s*search\s+for\s+(.+?)\s*$",
+    re.IGNORECASE,
+)
+_SEARCH_GOAL_FOLLOW_UP = re.compile(
+    r"\s+and\s+(?:go|open|visit|click|select)\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
+    """Recover an explicit search request when the model incorrectly returns fail."""
+    match = _SEARCH_GOAL.match(goal)
+    if not match:
+        return None
+
+    query = _SEARCH_GOAL_FOLLOW_UP.sub("", match.group(1)).strip().strip(" \t\r\n\"'`.,!?;:")
+    if not query:
+        return None
+
+    for element in context.sanitized_schema.elements:
+        if (
+            element.tagName.lower() not in {"input", "textarea"}
+            or not element.isVisible
+            or not element.isInteractive
+            or element.isDisabled
+            or element.isReadOnly
+        ):
+            continue
+
+        attrs = element.attributes or {}
+        hints = " ".join(
+            str(value)
+            for value in (
+                element.type,
+                element.role,
+                element.label,
+                attrs.get("type"),
+                attrs.get("role"),
+                attrs.get("aria-label"),
+                attrs.get("placeholder"),
+                attrs.get("name"),
+            )
+            if value
+        ).lower()
+        is_search = (
+            str(element.type or attrs.get("type", "")).lower() == "search"
+            or str(attrs.get("name", "")).lower() in {"q", "query"}
+            or bool(re.search(r"\b(search|find)\b", hints))
+        )
+        if is_search:
+            return ActionObject(
+                action_type="type",
+                target=element.id,
+                value=query[:500],
+                reasoning="Use the visible search field for the requested search.",
+            )
+    return None
 
 
 class AgentOrchestrator:
@@ -43,6 +104,18 @@ class AgentOrchestrator:
                 goal=session.goal,
                 action_history=list(session.action_history)
             )
+
+            if action.action_type == "fail":
+                fallback = _search_fallback(session.goal, context)
+                if fallback:
+                    action = fallback
+                    slog.info(
+                        module="ORCHESTRATOR",
+                        event="SEARCH_FALLBACK_APPLIED",
+                        session_id=session.session_id,
+                        step_number=context.step_number,
+                        target_element_id=fallback.target,
+                    )
 
             # 3. Server-side validation
             from aegis_server.action_validator import action_validator
