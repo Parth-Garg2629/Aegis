@@ -87,6 +87,19 @@ export async function executeAction(action: ActionObject, stepNumber: number): P
         el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
         el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
 
+        // Submit search bars and other forms by pressing Enter after typing.
+        // This is necessary for Google, Bing, and most single-field search UIs
+        // which only submit on Enter rather than listening to the change event.
+        const isSearch = el.type === 'search' || el.form !== null || el instanceof HTMLTextAreaElement === false;
+        if (isSearch) {
+          const enterOpts: KeyboardEventInit = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+          el.dispatchEvent(new KeyboardEvent('keydown', enterOpts));
+          el.dispatchEvent(new KeyboardEvent('keypress', enterOpts));
+          el.dispatchEvent(new KeyboardEvent('keyup', enterOpts));
+          // Also try submitting the closest form directly as a fallback
+          el.form?.requestSubmit?.();
+        }
+
         return { step_number: stepNumber, action_type, success: true };
       }
 
