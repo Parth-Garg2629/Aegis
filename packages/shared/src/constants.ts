@@ -87,4 +87,4 @@ export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
 
 export const PROTOCOL_VERSION = '1.0' as const;
 export const DEFAULT_MAX_STEPS = 30;
-export const DEFAULT_SERVER_ENDPOINT = 'ws://127.0.0.1:8000/ws';
+export const DEFAULT_SERVER_ENDPOINT = 'wss://aegis-api-2jgt.onrender.com/ws';

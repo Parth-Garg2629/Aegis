@@ -11,7 +11,7 @@ import type {
   SessionErrorMessage,
   SessionInitMessage,
 } from '@aegis/protocol';
-import { slog, type Sanitized } from '@aegis/shared';
+import { DEFAULT_SERVER_ENDPOINT, slog, type Sanitized } from '@aegis/shared';
 
 export interface WebSocketClientCallbacks {
   onSessionCreated?: (msg: SessionCreatedMessage) => void;
@@ -27,7 +27,7 @@ export class AegisWebSocketClient {
   private callbacks: WebSocketClientCallbacks = {};
   private isConnecting = false;
 
-  constructor(serverUrl = 'ws://127.0.0.1:8765/ws') {
+  constructor(serverUrl = DEFAULT_SERVER_ENDPOINT) {
     this.serverUrl = serverUrl;
   }
 

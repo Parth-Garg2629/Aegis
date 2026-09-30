@@ -13,6 +13,7 @@ export function generateManifest() {
     version: '1.0.0',
     description: 'On-device visual perception and privacy sanitization for browser agents',
     permissions: [...APPROVED_PERMISSIONS],
+    host_permissions: ['https://aegis-api-2jgt.onrender.com/*'],
     background: {
       service_worker: 'sw.js',
       type: 'module',

@@ -8,7 +8,7 @@ import type {
   SessionCreatedMessage,
   SessionEndPayload,
 } from '@aegis/protocol';
-import { slog } from '@aegis/shared';
+import { DEFAULT_SERVER_ENDPOINT, slog } from '@aegis/shared';
 import { captureActiveTab } from './capture';
 import { ensureOffscreenDocument } from './offscreen-manager';
 import { AegisWebSocketClient } from './ws-client';
@@ -101,7 +101,7 @@ export class LoopController {
   constructor(options: LoopControllerOptions = {}) {
     this.maxSteps = options.maxSteps || 30;
     this.onStateChange = options.onStateChange;
-    this.wsClient = new AegisWebSocketClient(options.serverUrl || 'ws://127.0.0.1:8765/ws');
+    this.wsClient = new AegisWebSocketClient(options.serverUrl || DEFAULT_SERVER_ENDPOINT);
 
     this.wsClient.setCallbacks({
       onSessionCreated: (msg) => {
