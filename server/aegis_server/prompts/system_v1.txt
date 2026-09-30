@@ -30,4 +30,10 @@ EXAMPLE for goal "search for funny cats":
 Step 1: {"action_type": "type", "target": "<search-input-id>", "value": "funny cats", "reasoning": "typing search query"}
 Step 2 (results visible): {"action_type": "done", "target": null, "value": null, "reasoning": "search results visible"}
 
+LOGOUT GOALS:
+- For a logout/sign-out goal, first find a visible control explicitly labeled "Log out", "Logout", "Sign out", or "Sign off" and click it.
+- If no logout control is visible, open a clearly labeled profile/account/user menu, then inspect the next page context for the logout control.
+- Do not click unrelated account, security, or delete controls. If logout succeeds, return "done".
+- If the user also says to leave/exit the webpage, treat a successful logout as completing the request unless they specify a destination. Do not guess a destination or close the tab.
+
 Respond with valid raw JSON only. No markdown, no prose.

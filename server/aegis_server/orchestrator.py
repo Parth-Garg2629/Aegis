@@ -28,6 +28,9 @@ _FIRST_LINK_GOAL = re.compile(
     r"\b(?:(?:go|open|visit|click|navigate)\b.*\b(?:first|top)\b.*\b(?:link|result|url)\b|(?:first|top)\s+(?:link|result|url)\b)",
     re.IGNORECASE,
 )
+_LOGOUT_GOAL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
+_LOGOUT_CONTROL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
+_PROFILE_MENU_CONTROL = re.compile(r"\b(profile|account|user\s+menu|your\s+account|my\s+account)\b", re.I)
 
 
 def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
@@ -109,6 +112,67 @@ def _action_targets_external_link(action: ActionObject, context: ContextUpdatePa
     return bool(target_host and page_host and target_host.lower() != page_host.lower())
 
 
+def _element_action_text(element) -> str:
+    attrs = element.attributes or {}
+    return " ".join(
+        str(value)
+        for value in (
+            element.label,
+            element.text,
+            attrs.get("aria-label"),
+            attrs.get("title"),
+        )
+        if value
+    )
+
+
+def _logout_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
+    """Choose only a clearly labeled logout control or profile menu for logout goals."""
+    if not _LOGOUT_GOAL.search(goal):
+        return None
+
+    candidates = [
+        element
+        for element in context.sanitized_schema.elements
+        if element.isVisible
+        and element.isInteractive
+        and not element.isDisabled
+        and element.tagName.lower() in {"a", "button", "input"}
+    ]
+    logout_control = next(
+        (element for element in candidates if _LOGOUT_CONTROL.search(_element_action_text(element))),
+        None,
+    )
+    if logout_control:
+        return ActionObject(
+            action_type="click",
+            target=logout_control.id,
+            reasoning="Click the clearly labeled logout control.",
+        )
+
+    profile_menu = next(
+        (element for element in candidates if _PROFILE_MENU_CONTROL.search(_element_action_text(element))),
+        None,
+    )
+    if profile_menu:
+        return ActionObject(
+            action_type="click",
+            target=profile_menu.id,
+            reasoning="Open the clearly labeled account menu to find logout.",
+        )
+    return None
+
+
+def _action_targets_logout(action: ActionObject, context: ContextUpdatePayload) -> bool:
+    if action.action_type != "click" or not action.target:
+        return False
+    element = next(
+        (item for item in context.sanitized_schema.elements if item.id == action.target),
+        None,
+    )
+    return bool(element and _LOGOUT_CONTROL.search(_element_action_text(element)))
+
+
 def _search_completion_action(
     goal: str,
     context: ContextUpdatePayload,
@@ -159,6 +223,26 @@ def _first_link_completion_action(
     return None
 
 
+def _logout_completion_action(
+    goal: str,
+    context: ContextUpdatePayload,
+    previous_action_was_logout: bool,
+) -> Optional[ActionObject]:
+    previous = context.previous_action_result
+    if (
+        _LOGOUT_GOAL.search(goal)
+        and previous_action_was_logout
+        and previous
+        and previous.success
+        and previous.action_type == "click"
+    ):
+        return ActionObject(
+            action_type="done",
+            reasoning="The requested logout control was clicked successfully.",
+        )
+    return None
+
+
 class AgentOrchestrator:
     def __init__(self, provider: Optional[VLMProvider] = None):
         if provider is None:
@@ -192,6 +276,10 @@ class AgentOrchestrator:
                 session.goal,
                 context,
                 session.last_action_was_external_link,
+            ) or _logout_completion_action(
+                session.goal,
+                context,
+                session.last_action_was_logout,
             )
             if action:
                 slog.info(
@@ -209,7 +297,10 @@ class AgentOrchestrator:
                 )
 
             if action.action_type == "fail":
-                fallback = _search_fallback(session.goal, context)
+                fallback = (
+                    _search_fallback(session.goal, context)
+                    or _logout_fallback(session.goal, context)
+                )
                 if fallback:
                     action = fallback
                     slog.info(
@@ -251,6 +342,7 @@ class AgentOrchestrator:
 
             session.last_action_was_search = _action_targets_search_field(action, context)
             session.last_action_was_external_link = _action_targets_external_link(action, context)
+            session.last_action_was_logout = _action_targets_logout(action, context)
 
             slog.info(
                 module="ORCHESTRATOR",

@@ -65,6 +65,7 @@ class Session:
         self.action_history: Deque[ActionHistoryItem] = deque(maxlen=5)
         self.last_action_was_search = False
         self.last_action_was_external_link = False
+        self.last_action_was_logout = False
 
         # Latest context buffer
         self.latest_context: Optional[ContextUpdatePayload] = None
