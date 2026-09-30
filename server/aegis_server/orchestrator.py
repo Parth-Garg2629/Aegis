@@ -8,7 +8,7 @@ and generating actions.
 import re
 from typing import Optional, Tuple
 from datetime import datetime, timezone
-from urllib.parse import unquote_plus
+from urllib.parse import urlsplit
 from aegis_server.protocol import ActionObject, ContextUpdatePayload, RiskAssessment
 from aegis_server.providers import VLMProvider, get_configured_provider
 from aegis_server.session import Session, SessionState
@@ -24,6 +24,10 @@ _SEARCH_GOAL_FOLLOW_UP = re.compile(
     r"\s+and\s+(?:go|open|visit|click|select)\b.*$",
     re.IGNORECASE,
 )
+_FIRST_LINK_GOAL = re.compile(
+    r"\b(?:(?:go|open|visit|click|navigate)\b.*\b(?:first|top)\b.*\b(?:link|result|url)\b|(?:first|top)\s+(?:link|result|url)\b)",
+    re.IGNORECASE,
+)
 
 
 def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
@@ -37,36 +41,7 @@ def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[Actio
         return None
 
     for element in context.sanitized_schema.elements:
-        if (
-            element.tagName.lower() not in {"input", "textarea"}
-            or not element.isVisible
-            or not element.isInteractive
-            or element.isDisabled
-            or element.isReadOnly
-        ):
-            continue
-
-        attrs = element.attributes or {}
-        hints = " ".join(
-            str(value)
-            for value in (
-                element.type,
-                element.role,
-                element.label,
-                attrs.get("type"),
-                attrs.get("role"),
-                attrs.get("aria-label"),
-                attrs.get("placeholder"),
-                attrs.get("name"),
-            )
-            if value
-        ).lower()
-        is_search = (
-            str(element.type or attrs.get("type", "")).lower() == "search"
-            or str(attrs.get("name", "")).lower() in {"q", "query"}
-            or bool(re.search(r"\b(search|find)\b", hints))
-        )
-        if is_search:
+        if _is_search_field(element):
             return ActionObject(
                 action_type="type",
                 target=element.id,
@@ -76,13 +51,79 @@ def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[Actio
     return None
 
 
+def _is_search_field(element) -> bool:
+    if (
+        element.tagName.lower() not in {"input", "textarea"}
+        or not element.isVisible
+        or not element.isInteractive
+        or element.isDisabled
+        or element.isReadOnly
+    ):
+        return False
+
+    attrs = element.attributes or {}
+    hints = " ".join(
+        str(value)
+        for value in (
+            element.type,
+            element.role,
+            element.label,
+            attrs.get("type"),
+            attrs.get("role"),
+            attrs.get("aria-label"),
+            attrs.get("placeholder"),
+            attrs.get("name"),
+        )
+        if value
+    ).lower()
+    return (
+        str(element.type or attrs.get("type", "")).lower() == "search"
+        or str(attrs.get("name", "")).lower() in {"q", "query"}
+        or bool(re.search(r"\b(search|find)\b", hints))
+    )
+
+
+def _action_targets_search_field(action: ActionObject, context: ContextUpdatePayload) -> bool:
+    if action.action_type != "type" or not action.target:
+        return False
+    return any(
+        element.id == action.target and _is_search_field(element)
+        for element in context.sanitized_schema.elements
+    )
+
+
+def _action_targets_external_link(action: ActionObject, context: ContextUpdatePayload) -> bool:
+    if action.action_type != "click" or not action.target:
+        return False
+    element = next(
+        (item for item in context.sanitized_schema.elements if item.id == action.target),
+        None,
+    )
+    if not element or element.tagName.lower() != "a":
+        return False
+    href = str((element.attributes or {}).get("href", ""))
+    if not href.startswith(("http://", "https://")):
+        return False
+    target_host = urlsplit(href).hostname
+    page_host = urlsplit(context.sanitized_schema.url).hostname
+    return bool(target_host and page_host and target_host.lower() != page_host.lower())
+
+
 def _search_completion_action(
-    goal: str, context: ContextUpdatePayload
+    goal: str,
+    context: ContextUpdatePayload,
+    previous_action_was_search: bool,
 ) -> Optional[ActionObject]:
-    """Finish a search-only goal after a successful search reaches its results page."""
+    """Finish a search-only goal after its search field was successfully submitted."""
     match = _SEARCH_GOAL.match(goal)
     previous = context.previous_action_result
-    if not match or not previous or not previous.success or previous.action_type != "type":
+    if (
+        not match
+        or not previous_action_was_search
+        or not previous
+        or not previous.success
+        or previous.action_type != "type"
+    ):
         return None
 
     # A goal that asks to open or visit a result still has work after searching.
@@ -92,16 +133,28 @@ def _search_completion_action(
     query = raw_query.strip().strip(" \t\r\n\"'`.,!?;:")
     if not query:
         return None
-
-    normalize = lambda value: re.sub(r"\W+", " ", value.casefold()).strip()
-    normalized_query = normalize(query)
-    page_text = normalize(unquote_plus(context.sanitized_schema.url)) + " " + normalize(
-        context.sanitized_schema.title
+    return ActionObject(
+        action_type="done",
+        reasoning="The requested search was submitted successfully.",
     )
-    if normalized_query and normalized_query in page_text:
+
+
+def _first_link_completion_action(
+    goal: str,
+    context: ContextUpdatePayload,
+    previous_action_was_external_link: bool,
+) -> Optional[ActionObject]:
+    previous = context.previous_action_result
+    if (
+        _FIRST_LINK_GOAL.search(goal)
+        and previous_action_was_external_link
+        and previous
+        and previous.success
+        and previous.action_type == "click"
+    ):
         return ActionObject(
             action_type="done",
-            reasoning="The requested search results are visible.",
+            reasoning="The requested first external link opened successfully.",
         )
     return None
 
@@ -129,9 +182,17 @@ class AgentOrchestrator:
             if session.current_step > session.max_steps:
                 return ActionObject(action_type="fail", reasoning="Maximum steps reached"), None
 
-            # Finish search-only goals when the previous search submission
-            # succeeded and the current page identifies the requested results.
-            action = _search_completion_action(session.goal, context)
+            # Finish search-only goals when the previous search-field action
+            # succeeded. Goals with an explicit follow-up remain with the VLM.
+            action = _search_completion_action(
+                session.goal,
+                context,
+                session.last_action_was_search,
+            ) or _first_link_completion_action(
+                session.goal,
+                context,
+                session.last_action_was_external_link,
+            )
             if action:
                 slog.info(
                     module="ORCHESTRATOR",
@@ -187,6 +248,9 @@ class AgentOrchestrator:
                     reason=risk_assessment.reason
                 )
                 return ActionObject(action_type="fail", reasoning=f"Action blocked by risk engine: {risk_assessment.reason}"), risk_assessment
+
+            session.last_action_was_search = _action_targets_search_field(action, context)
+            session.last_action_was_external_link = _action_targets_external_link(action, context)
 
             slog.info(
                 module="ORCHESTRATOR",

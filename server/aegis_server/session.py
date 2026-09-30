@@ -63,6 +63,8 @@ class Session:
 
         # FIFO queue for last 5 actions
         self.action_history: Deque[ActionHistoryItem] = deque(maxlen=5)
+        self.last_action_was_search = False
+        self.last_action_was_external_link = False
 
         # Latest context buffer
         self.latest_context: Optional[ContextUpdatePayload] = None
