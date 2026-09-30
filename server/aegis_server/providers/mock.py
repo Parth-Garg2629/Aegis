@@ -45,30 +45,29 @@ class MockVLMProvider(VLMProvider):
         # 2. Default deterministic fallback (for Phase A walking skeleton tests)
         step = context.step_number
         elements = context.sanitized_schema.elements
+        fallback_id = elements[0].id if elements else "unknown-target"
 
         if context.sanitized_schema.title == "AEGIS Demo Form":
             if step == 1:
-                target_id = "orgName"
+                target_id = next((el.id for el in elements if el.tagName == "input"), fallback_id)
                 return ActionObject(action_type="type", target=target_id, value="Acme Corp", reasoning="Entering organization name")
             if step == 2:
-                target_id = "btnContinue1"
+                target_id = next((el.id for el in elements if el.tagName == "button"), fallback_id)
                 return ActionObject(action_type="click", target=target_id, reasoning="Clicking Continue")
             if step == 3:
-                target_id = "acceptTerms"
+                # Find a checkbox or second button
+                checkboxes = [el.id for el in elements if el.tagName == "input" and el.type == "checkbox"]
+                target_id = checkboxes[0] if checkboxes else fallback_id
                 return ActionObject(action_type="click", target=target_id, reasoning="Accepting terms")
             if step == 4:
-                target_id = "btnContinue2"
+                buttons = [el.id for el in elements if el.tagName == "button"]
+                target_id = buttons[1] if len(buttons) > 1 else fallback_id
                 return ActionObject(action_type="click", target=target_id, reasoning="Clicking Complete Setup")
             return ActionObject(action_type="done", reasoning="Setup Complete!")
 
         # 2. Default deterministic fallback (for Phase A walking skeleton tests)
         if step == 1:
-            target_id = "el-search-input"
-            for el in elements:
-                if el.tagName in ("input", "textarea") and el.type != "hidden":
-                    target_id = el.id
-                    break
-
+            target_id = next((el.id for el in elements if el.tagName in ("input", "textarea") and el.type != "hidden"), fallback_id)
             return ActionObject(
                 action_type="type",
                 target=target_id,
@@ -77,12 +76,7 @@ class MockVLMProvider(VLMProvider):
             )
 
         if step == 2:
-            target_id = "el-submit-button"
-            for el in elements:
-                if el.tagName == "button" or el.role == "button" or el.type == "submit":
-                    target_id = el.id
-                    break
-
+            target_id = next((el.id for el in elements if el.tagName == "button" or el.role == "button" or el.type == "submit"), fallback_id)
             return ActionObject(
                 action_type="click",
                 target=target_id,

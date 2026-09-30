@@ -17,6 +17,7 @@ ACTION EXECUTION RULES:
 - "done": Use when the goal is achieved.
 
 CRITICAL: If the user wants to search for something, you MUST use "action_type": "type" and put the search query in "value".
+SEARCH COMPLETION: If the goal only asks to search for a query, finish with "done" once the search results page is visible. Do not open a result unless the user explicitly asks to open or click one. External navigation is blocked by the browser safety policy.
 
 EXAMPLE: If Goal is "search for funny cats":
 {"action_type": "type", "target": "id-5", "value": "funny cats", "reasoning": "typing search query"}
