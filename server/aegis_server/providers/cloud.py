@@ -181,32 +181,8 @@ class CloudProvider(VLMProvider):
                         "max_tokens": 800,
                         "reasoning": {"effort": "low"},
                         "response_format": {
-                            "type": "json_schema",
-                            "json_schema": {
-                                "name": "aegis_action",
-                                "strict": True,
-                                "schema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "action_type": {
-                                            "type": "string",
-                                            "enum": [
-                                                "click", "type", "scroll", "select",
-                                                "hover", "wait", "done", "fail",
-                                            ],
-                                        },
-                                        "target": {"type": ["string", "null"]},
-                                        "value": {"type": ["string", "null"]},
-                                        "reasoning": {"type": "string"},
-                                    },
-                                    "required": [
-                                        "action_type", "target", "value", "reasoning",
-                                    ],
-                                    "additionalProperties": False,
-                                },
-                            },
+                            "type": "json_object"
                         },
-                        "provider": {"require_parameters": True},
                         "stream": False,
                     },
                 )
