@@ -53,7 +53,7 @@ class RiskEngine:
                     return RiskAssessment(level="safe")
                 return RiskAssessment(level="safe")
 
-            # 4. Check external link (Blocked)
+            # 4. External navigation requires explicit user confirmation.
             if action.action_type == "click" and target_el.tagName.lower() == "a":
                 attrs = target_el.attributes or {}
                 href = attrs.get("href", "")
@@ -66,7 +66,11 @@ class RiskEngine:
                         return u
                     
                     if get_domain(str(href)) != get_domain(ctx_url):
-                        return RiskAssessment(level="blocked", reason="External navigation")
+                        return RiskAssessment(
+                            level="high_risk",
+                            category="HR-08",
+                            reason="External navigation requires confirmation",
+                        )
 
             # 5. Check High Risk
             attrs = target_el.attributes or {}

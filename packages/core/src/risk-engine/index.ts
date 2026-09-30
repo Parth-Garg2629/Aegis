@@ -41,7 +41,7 @@ export function evaluateActionRisk(action: ActionObject, schema: SanitizedSchema
     return { level: 'safe' };
   }
 
-  // 4. Check external link (Blocked)
+  // 4. External navigation requires explicit user confirmation.
   if (action.action_type === 'click' && target_el.tagName.toLowerCase() === 'a') {
     const attrs = target_el.attributes || {};
     const href = attrs['href'] || '';
@@ -52,7 +52,11 @@ export function evaluateActionRisk(action: ActionObject, schema: SanitizedSchema
         return parts.length >= 3 ? parts[2] : u;
       };
       if (get_domain(String(href)) !== get_domain(ctx_url)) {
-        return { level: 'blocked', reason: 'External navigation' };
+        return {
+          level: 'high_risk',
+          matchedCategory: 'HR-08',
+          reason: 'External navigation requires confirmation',
+        };
       }
     }
   }
