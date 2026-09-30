@@ -37,16 +37,67 @@ function redactString(text: string): string {
   return sanitized;
 }
 
+const SAFE_ELEMENT_FIELDS = new Set([
+  'id', 'tagName', 'type', 'role', 'label', 'text', 'value', 'boundingBox',
+  'isVisible', 'isDisabled', 'isReadOnly', 'isInteractive', 'parentFormId', 'attributes',
+]);
+const SAFE_ATTRIBUTES = new Set([
+  'type', 'role', 'autocomplete', 'aria-label', 'placeholder', 'href', 'target',
+  'download', 'disabled', 'readonly', 'required', 'multiple',
+]);
+
+function originOnly(value: unknown): string | null {
+  if (typeof value !== 'string' || !value) return null;
+  try { return new URL(value).origin; } catch { return null; }
+}
+
 export function sanitizeSchema<T extends MinimalSchema>(schema: T, sensitivityMap: SensitivityMap): T {
-  // Deep clone to avoid mutating the original
-  const sanitized: T = JSON.parse(JSON.stringify(schema));
+  // Rebuild from an allowlist so unexpected page-authored fields cannot flow
+  // across the browser/backend boundary.
+  const raw = JSON.parse(JSON.stringify(schema)) as Record<string, any>;
+  const sanitized = {
+    url: raw.url,
+    title: raw.title,
+    elements: Array.isArray(raw.elements) ? raw.elements.map((element: Record<string, any>) => {
+      const clean: Record<string, any> = {};
+      for (const [key, value] of Object.entries(element)) {
+        if (SAFE_ELEMENT_FIELDS.has(key)) clean[key] = value;
+      }
+      if (clean.attributes && typeof clean.attributes === 'object') {
+        const attributes: Record<string, string | number | boolean | null> = {};
+        for (const [key, value] of Object.entries(clean.attributes)) {
+          if (!SAFE_ATTRIBUTES.has(key.toLowerCase()) || key.toLowerCase() === 'value') continue;
+          if (key.toLowerCase() === 'href') {
+            const origin = originOnly(value);
+            if (origin) attributes.href = origin;
+          } else if (key.toLowerCase() === 'download') {
+            attributes.download = '';
+          } else if (typeof value === 'string') {
+            attributes[key] = redactString(value);
+          } else {
+            attributes[key] = value as string | number | boolean | null;
+          }
+        }
+        clean.attributes = attributes;
+      }
+      return clean;
+    }) : [],
+    ...(Array.isArray(raw.forms) ? {
+      forms: raw.forms.map((form: Record<string, any>) => ({
+        id: form.id,
+        action: originOnly(form.action),
+        method: form.method === 'POST' ? 'POST' : 'GET',
+        elementIds: Array.isArray(form.elementIds) ? form.elementIds : [],
+      })),
+    } : {}),
+  } as T;
   
   // 1. URL: Origin + pathname only
   try {
     const urlObj = new URL(sanitized.url);
     sanitized.url = urlObj.origin + urlObj.pathname;
-  } catch (e) {
-    // If not a valid URL, just leave it or empty it. For now, leave it.
+  } catch {
+    sanitized.url = '';
   }
   
   // 2. Title
@@ -90,18 +141,11 @@ export function sanitizeSchema<T extends MinimalSchema>(schema: T, sensitivityMa
       // d. attributes
       if (el.attributes) {
         for (const [key, val] of Object.entries(el.attributes)) {
-          if (typeof val === 'string') {
-            el.attributes[key] = redactString(val);
-          }
+          if (typeof val === 'string') el.attributes[key] = redactString(val);
         }
       }
     }
   }
-  
-  // 4. Ensure forbidden fields are stripped
-  delete (sanitized as any).sensitivityMap;
-  delete (sanitized as any).cookies;
-  delete (sanitized as any).tokens;
   
   return sanitized;
 }
@@ -123,24 +167,22 @@ export function verifySchema(schema: MinimalSchema): VerificationResult {
     }
   }
 
-  checkString(schema.title, 'title');
-  checkString(schema.url, 'url');
-
-  if (Array.isArray(schema.elements)) {
-    schema.elements.forEach((el, idx) => {
-      checkString(el.label || '', `elements[${idx}].label`);
-      checkString(el.text || '', `elements[${idx}].text`);
-      checkString(el.value || '', `elements[${idx}].value`);
-      
-      if (el.attributes) {
-        for (const [key, val] of Object.entries(el.attributes)) {
-          if (typeof val === 'string') {
-            checkString(val, `elements[${idx}].attributes.${key}`);
-          }
-        }
+  const visit = (value: unknown, path: string, key = ''): void => {
+    if (typeof value === 'string') {
+      if (!['id', 'parentFormId'].includes(key) && key !== 'elementIds') checkString(value, path);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, `${path}[${index}]`, key));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      for (const [childKey, child] of Object.entries(value)) {
+        visit(child, path ? `${path}.${childKey}` : childKey, childKey);
       }
-    });
-  }
+    }
+  };
+  visit(schema, '');
 
   return result;
 }

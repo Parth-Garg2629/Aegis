@@ -42,6 +42,21 @@ describe('Privacy Builder D5', () => {
     })).rejects.toThrow(SanitizationError);
   });
 
+  it('fails closed when PII survives schema sanitation in any retained field', async () => {
+    vi.spyOn(screenshotSanitizer, 'sanitizeScreenshot').mockResolvedValueOnce({
+      dataUrl: 'data:image/webp;base64,ok', redactedRegions: 0, failedRegions: 0,
+    });
+    const rawSchema: MinimalSchema = {
+      url: 'https://example.com',
+      title: 'Safe title',
+      elements: [{ id: 'el-0', tagName: 'input user@example.com' }],
+    };
+    await expect(buildSanitizedContext({
+      rawDataUrl: 'raw', rawSchema, sensitivityMap: { regions: [] }, dpr: 1,
+      stepNumber: 1, agentState: 'running', previousActionResult: null,
+    })).rejects.toThrow(SanitizationError);
+  });
+
   it('throws SanitizationError in strictMode if verification finds PII', async () => {
     vi.spyOn(screenshotSanitizer, 'sanitizeScreenshot').mockResolvedValueOnce({
       dataUrl: 'data:image/webp;base64,ok',

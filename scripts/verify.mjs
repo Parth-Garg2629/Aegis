@@ -11,6 +11,7 @@ const APPROVED_PERMISSIONS = new Set([
   'storage',
   'offscreen',
   'scripting',
+  'tabs',
 ]);
 
 function runStep(name, fn) {

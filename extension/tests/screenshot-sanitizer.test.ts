@@ -68,6 +68,29 @@ describe('Screenshot Sanitizer D4', () => {
     expect(res.failedRegions).toBe(0);
   });
 
+  it('fails closed when any screenshot redaction operation fails', async () => {
+    const originalCanvas = global.OffscreenCanvas;
+    global.OffscreenCanvas = class {
+      width: number;
+      height: number;
+      constructor(width: number, height: number) { this.width = width; this.height = height; }
+      getContext() { return { drawImage: vi.fn(), fillRect: () => { throw new Error('redaction failed'); }, fillText: vi.fn(), filter: '' }; }
+      convertToBlob() { return Promise.resolve(new Blob(['fake'], { type: 'image/webp' })); }
+    } as any;
+    try {
+      await expect(sanitizeScreenshot('data:image/png;base64,xx', {
+        regions: [{
+          regionId: 'r1', elementId: 'el-0',
+          boundingBox: { x: 1, y: 1, w: 30, h: 10 },
+          category: 'GENERIC_PII', confidence: 1, failSafe: false,
+          sanitizationAction: 'MASK_VISUAL', sources: ['HEURISTIC_PII'],
+        }],
+      }, 1)).rejects.toThrow('Sanitization failed');
+    } finally {
+      global.OffscreenCanvas = originalCanvas;
+    }
+  });
+
   it('applyFaceUnavailableFallback blurs large image regions', () => {
     const canvas = new OffscreenCanvas(800, 600);
     const regions = [

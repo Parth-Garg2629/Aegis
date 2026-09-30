@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionMessage, SanitizedSchema } from '@aegis/protocol';
 import type { SessionStateUpdateMessage } from '../src/background/bus';
+import { scanGoal } from '@aegis/core';
 
 vi.mock('../src/background/capture', () => ({
   captureActiveTab: vi.fn(async () => ({
@@ -15,7 +16,7 @@ vi.mock('../src/background/capture', () => ({
 vi.mock('../src/background/offscreen-manager', () => ({ ensureOffscreenDocument: vi.fn(async () => {}) }));
 
 vi.mock('@aegis/core', () => ({
-  scanGoal: vi.fn(() => ({ hasSensitiveContent: false })),
+  scanGoal: vi.fn((goal: string) => ({ hasSensitiveContent: false, categories: [], sanitizedGoal: goal })),
   validateAction: vi.fn(() => ({ valid: true })),
   evaluateActionRisk: vi.fn(() => ({ level: 'safe' })),
 }));
@@ -57,6 +58,8 @@ const schema: SanitizedSchema = {
 };
 
 let contentScriptMissing = false;
+let domExtractionFailed = false;
+let executionFailureCode: string | null = null;
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -148,16 +151,25 @@ function makeChromeApi() {
       query: vi.fn(async () => [{ id: 1 }]),
       sendMessage: vi.fn(async (_tabId: number, message: Record<string, any>) => {
         if (message.type === 'EXTRACT_DOM_REQUEST') {
+          if (domExtractionFailed) {
+            return { type: 'EXTRACT_DOM_RESPONSE', success: false, errorCode: 'DOM_EXTRACTION_FAILED', schema: { url: '', title: '', elements: [] }, elementsCount: 0, domSignals: [], piiSignals: [] };
+          }
           if (contentScriptMissing) {
             contentScriptMissing = false;
             throw new Error('Could not establish connection. Receiving end does not exist.');
           }
-          return { type: 'EXTRACT_DOM_RESPONSE', schema, elementsCount: schema.elements.length, domSignals: [], piiSignals: [] };
+          return { type: 'EXTRACT_DOM_RESPONSE', success: true, schema, elementsCount: schema.elements.length, domSignals: [], piiSignals: [] };
         }
         if (message.type === 'EXECUTE_ACTION_REQUEST') {
           return {
             type: 'EXECUTE_ACTION_RESPONSE',
-            result: { step_number: message.stepNumber, action_type: message.action.action_type, success: true },
+            result: {
+              step_number: message.stepNumber,
+              action_type: message.action.action_type,
+              success: executionFailureCode === null,
+              error_code: executionFailureCode ?? undefined,
+              error_message: executionFailureCode ? 'Target unavailable' : undefined,
+            },
           };
         }
         throw new Error('Unexpected tab message');
@@ -201,6 +213,8 @@ describe('LoopController lifecycle', () => {
     FakeWebSocket.disconnectNextContext = false;
     FakeWebSocket.sendStaleActionNext = false;
     contentScriptMissing = false;
+    domExtractionFailed = false;
+    executionFailureCode = null;
     vi.stubGlobal('WebSocket', FakeWebSocket);
     mockChromeApi = makeChromeApi();
     vi.stubGlobal('chrome', mockChromeApi);
@@ -263,6 +277,39 @@ describe('LoopController lifecycle', () => {
       target: { tabId: 1 },
       files: ['content.js'],
     });
+  });
+
+  it('fails closed instead of treating an extraction error as an empty page', async () => {
+    const updates: SessionStateUpdateMessage[] = [];
+    const controller = new LoopController({ onStateChange: (update) => updates.push(update) });
+    domExtractionFailed = true;
+
+    await controller.start('do not act without extracted page state');
+
+    expect(controller.getState()).toBe('failed');
+    expect(updates.at(-1)?.error).toContain('E-DOM_EXTRACTION_FAILED');
+    expect(FakeWebSocket.instances[0].messages.some((message) => message.type === 'context_update')).toBe(false);
+  });
+
+  it('preserves the concrete browser execution error in the final session state', async () => {
+    const updates: SessionStateUpdateMessage[] = [];
+    const controller = new LoopController({ onStateChange: (update) => updates.push(update) });
+    executionFailureCode = 'E-EXEC-01';
+
+    await controller.start('stop when the browser target cannot be found');
+
+    expect(controller.getState()).toBe('failed');
+    expect(updates.at(-1)?.error).toContain('E-EXEC-01');
+    expect(FakeWebSocket.instances[0].messages.some((message) => message.type === 'context_update' && message.payload.step_number === 2)).toBe(false);
+  });
+
+  it('sends a PII-scrubbed goal to the backend', async () => {
+    const controller = new LoopController();
+    vi.mocked(scanGoal).mockReturnValueOnce({ hasSensitiveContent: true, categories: ['EMAIL'], sanitizedGoal: 'Search for [REDACTED_EMAIL]' });
+    await controller.start('Search for user@example.com');
+    const init = FakeWebSocket.instances[0].messages.find((message) => message.type === 'session_init');
+    expect(init?.payload.goal).toContain('[REDACTED_EMAIL]');
+    expect(init?.payload.goal).not.toContain('user@example.com');
   });
 
   it('settles a pending action wait on disconnect and permits a fresh session', async () => {

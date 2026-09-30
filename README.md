@@ -105,6 +105,8 @@ $env:OLLAMA_MODEL = "qwen3-vl:4b"
 
 `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, and `OLLAMA_TIMEOUT_SECONDS` configure the Ollama provider. `AEGIS_AUTH_TOKEN` optionally enables token checking for WebSocket connections. Without it, the service skips authentication, so keep the service bound to localhost for development. The cloud provider is a stub and does not implement remote inference.
 
+`OLLAMA_NUM_CTX` sets Ollama's context window in tokens (default `8192`; minimum `4096`). The provider sends the structured ActionObject schema and only the sanitized screenshot when using a vision model.
+
 Download the configured model once before starting the backend:
 
 ```sh
@@ -135,8 +137,8 @@ The mock provider is intended for development and scripted flows. Use Ollama for
 ## Troubleshooting
 
 - The backend serves its health check at `http://127.0.0.1:8765/health`. A `404` at `/` is expected; there is no web page at the root URL.
-- For Ollama-backed runs, keep the Ollama service running and confirm the model is installed with `ollama list`. Start or restart the AEGIS backend after setting `VLM_PROVIDER`, `OLLAMA_BASE_URL`, and `OLLAMA_MODEL`.
-- If the popup reports `OLLAMA_HTTP_FAILED`, inspect the backend terminal for the `OLLAMA` / `HTTP_ERROR` log entry and its numeric `status_code`. The logger omits prompts, page content, screenshots, and raw model output.
+- For Ollama-backed runs, keep the Ollama service running and confirm the model is installed with `ollama list`. Start or restart the AEGIS backend after setting `VLM_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, and, if needed, `OLLAMA_NUM_CTX`.
+- Ollama HTTP failures are reported with their status code. Context overflow diagnostics include only token counts and the server context limit; prompts, page content, screenshots, and raw model output are not logged.
 - If a later Start click appears to do nothing, inspect the extension service worker console for `SESSION_START_REQUESTED`, `WEBSOCKET_OPEN`, and `NEXT_CYCLE_START`, and check the backend for `SESSION_INITIALIZED` and `CONTEXT_UPDATE_RECEIVED`. These event names help distinguish a popup/worker handoff issue from a provider request failure.
 - After rebuilding the extension, click **Reload** for the unpacked extension in `chrome://extensions`, then refresh the target page so Chrome injects the rebuilt content script.
 
@@ -187,31 +189,35 @@ The explicit file paths include three server tests stored outside `server/tests/
 
 The ML scripts under `ml/` (training, benchmarking, dataset generation, ONNX export) are run independently and are not covered by the test suites above.
 
-## Limitations and next steps
+## Current implementation
+
+- The MV3 extension captures the selected Chromium tab, extracts interactive DOM state, runs local perception and sanitization, and sends the sanitized context to the backend over WebSocket.
+- Filled form controls are withheld from the backend: their DOM values and visible screenshot regions are redacted locally. Page element IDs are opaque, schema attributes are allowlisted, and goal text is PII-scanned before session initialization.
+- The FastAPI backend supports a deterministic development mock and local Ollama inference. Ollama requests use structured ActionObject output and a configurable context window.
+- The extension validates actions, applies its client risk checks, requests confirmation when required, and executes the predefined action types against the selected page.
+- `fixtures/fp_01.html` and `fixtures/demo.html` are deterministic local pages for browser-flow work. They contain synthetic content only.
+
+## Current limitations
 
 - AEGIS currently targets Chromium browsers and the active tab. It does not handle multi-tab workflows.
+- AEGIS cannot promise support for every internet site. Chrome restricts extension access on browser-owned pages, and sites with login gates, anti-automation checks, closed shadow roots, or custom controls may not expose usable targets.
 - Detection is imperfect. Canvas-rendered text, unusual layouts, and pages designed to evade detection can defeat current checks.
+- PII detection uses local heuristics, not complete OCR or semantic detection. Sensitive text in images, canvas, unusual page regions, or patterns the local detectors do not recognize can escape redaction; AEGIS cannot promise detection of every sensitive value on every site.
+- DOM extraction cannot inspect the internals of cross-origin iframes; only the rendered screenshot is available for those regions. Screenshot capture covers the visible viewport.
+- Because filled values are kept from the model, entering sensitive values already stored in a page or in the task text is not supported; a secure local value-entry mechanism is not implemented.
 - The cloud provider is only a stub. Remote inference is not implemented.
 - The mock provider does not provide general-purpose reasoning.
 - Production deployment, hardened authentication, and broader threat testing remain future work.
-- Add verified screenshots and measured evaluation results so readers can assess the interface and privacy performance.
 
 ## Future Roadmap
 
-The long-term vision for AEGIS goes beyond a single extension to become the foundational safety layer for all browser-based AI agents.
+The following capabilities are planned and are not part of the current implementation:
 
-- **Phase 1: Robust Local Inference & Expanded Heuristics**
-  - Implement full local vision models via WebGPU.
-  - Enhance zero-shot PII detection for varied languages and layouts.
-- **Phase 2: Agentic Sandbox Environment**
-  - Introduce an isolated runtime execution environment (sandbox) where potentially risky scripts can be simulated.
-  - Granular control over form submissions and API calls initiated by the agent.
-- **Phase 3: Cross-Tab & Multi-Step Reasoning**
-  - Safely pass context across tabs without compromising redaction boundaries.
-  - Long-horizon planning with persistent memory safely encrypted on disk.
-- **Phase 4: Enterprise Policy Management**
-  - Support managed device policies to enforce global redaction lists (e.g. internal IP ranges, proprietary terms).
-  - Centralized audit logs for SOC2 compliance.
+- Hybrid local/cloud VLMs, additional configurable cloud providers, and automatic provider selection.
+- Zero-setup mode and more lightweight local VLM options.
+- Broader support for dynamic sites, cross-tab workflows, and iframes.
+- Production authentication, deployment hardening, and enterprise policy management.
+- Longer-horizon reasoning with carefully scoped persistent memory.
 
 ## Further reading
 

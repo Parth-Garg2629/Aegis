@@ -105,7 +105,7 @@ chrome.runtime.onMessage.addListener((message: BusMessage, _sender, sendResponse
       ensureOffscreenDocument().catch(() => {});
       const controller = getOrCreateLoopController();
       controller
-        .start(message.goal)
+        .start(message.goal, Number.isInteger(message.targetTabId) ? message.targetTabId : undefined)
         .catch((err) => {
           slog.error({
             module: 'SERVICE_WORKER',

@@ -15,14 +15,16 @@ describe('Schema Sanitizer D3', () => {
     expect(sanitized.url).toBe('https://example.com/path');
   });
 
-  it('redacts PII from title and attributes', () => {
+  it('redacts retained labels and drops unneeded page-authored attributes', () => {
     const schema: MinimalSchema = {
       url: 'https://example.com',
       title: 'Contact test@example.com',
       elements: [{
         id: '1',
         attributes: {
-          'data-info': 'Phone: +91 9876543210'
+          'aria-label': 'Phone: +91 9876543210',
+          value: 'unredacted@example.com',
+          'data-secret': 'private token'
         }
       }]
     };
@@ -30,7 +32,22 @@ describe('Schema Sanitizer D3', () => {
     
     const sanitized = sanitizeSchema(schema, sensitivityMap);
     expect(sanitized.title).toBe('Contact [REDACTED_EMAIL]');
-    expect(sanitized.elements[0].attributes!['data-info']).toBe('Phone: [REDACTED_PHONE]');
+    expect(sanitized.elements[0].attributes!['aria-label']).toBe('Phone: [REDACTED_PHONE]');
+    expect(sanitized.elements[0].attributes!['value']).toBeUndefined();
+    expect(sanitized.elements[0].attributes!['data-secret']).toBeUndefined();
+  });
+
+  it('minimizes form destinations and drops unexpected schema fields', () => {
+    const schema = {
+      url: 'https://example.com/form?token=secret',
+      title: 'Form',
+      elements: [],
+      forms: [{ id: 'f-1', action: 'https://example.com/submit?session=secret', method: 'POST', elementIds: [] }],
+      cookies: 'private-cookie',
+    } as unknown as MinimalSchema;
+    const sanitized = sanitizeSchema(schema, { regions: [] });
+    expect(sanitized.forms).toEqual([{ id: 'f-1', action: 'https://example.com', method: 'POST', elementIds: [] }]);
+    expect((sanitized as any).cookies).toBeUndefined();
   });
 
   it('redacts the entire element value if its ID is in the sensitivity map', () => {
@@ -73,6 +90,19 @@ describe('Schema Sanitizer D3', () => {
     expect(result.clean).toBe(false);
     expect(result.defectCount).toBe(1);
     expect(result.fieldPaths).toContain('title');
+  });
+
+  it('verifySchema checks nested form and attribute strings', () => {
+    const schema: MinimalSchema = {
+      url: 'https://example.com',
+      title: 'Clean',
+      elements: [{ id: 'el-0', attributes: { placeholder: 'Contact test@example.com' } }],
+      forms: [{ id: 'f-0', action: 'https://example.com/test@example.com', method: 'GET', elementIds: [] }],
+    };
+    const result = verifySchema(schema);
+    expect(result.clean).toBe(false);
+    expect(result.fieldPaths).toContain('elements[0].attributes.placeholder');
+    expect(result.fieldPaths).toContain('forms[0].action');
   });
 
   it('verifySchema passes clean schema', () => {

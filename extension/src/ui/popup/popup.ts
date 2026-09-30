@@ -201,7 +201,19 @@ startBtn?.addEventListener('click', () => {
 
   const msg: StartSessionMessage = { type: 'START_SESSION', goal };
   if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-    chrome.runtime.sendMessage(msg);
+    // Capture the page selected when the user presses Start. The popup itself
+    // is not a tab, so this remains the foreground webpage even after the
+    // service worker begins its asynchronous setup.
+    void chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => {
+      const activeTabId = tabs[0]?.id;
+      chrome.runtime.sendMessage({ ...msg, targetTabId: activeTabId });
+    }).catch(() => {
+      addLog('Could not determine the active browser tab.', 'error');
+      startBtn.disabled = false;
+      cancelBtn.disabled = true;
+      goalInput.disabled = false;
+      setConnected(false);
+    });
   }
 });
 

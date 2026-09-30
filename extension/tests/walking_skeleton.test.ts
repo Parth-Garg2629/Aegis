@@ -10,7 +10,7 @@ describe('Phase 2: Walking Skeleton Unit Tests', () => {
   });
 
   describe('StableIdRegistry (Work Package B2)', () => {
-    it('assigns deterministic IDs without mutating the DOM', () => {
+    it('assigns opaque deterministic IDs without exposing page-authored IDs', () => {
       const div1 = { id: '', attributes: [] } as unknown as Element;
       const div2 = { id: 'search-box', attributes: [] } as unknown as Element;
 
@@ -18,7 +18,8 @@ describe('Phase 2: Walking Skeleton Unit Tests', () => {
       const id2 = idRegistry.getOrCreateId(div2);
 
       expect(id1).toMatch(/^el-\d+$/);
-      expect(id2).toBe('el-search-box');
+      expect(id2).toMatch(/^el-\d+$/);
+      expect(id2).not.toContain('search-box');
 
       expect(idRegistry.getOrCreateId(div1)).toBe(id1);
       expect(idRegistry.getOrCreateId(div2)).toBe(id2);

@@ -14,6 +14,8 @@ export type BusMessageType =
 export interface StartSessionMessage {
   type: 'START_SESSION';
   goal: string;
+  /** Optional explicit target used by supported multi-tab integrations. */
+  targetTabId?: number;
 }
 
 export interface CancelSessionMessage {
@@ -46,6 +48,8 @@ export interface ExtractDomRequestMessage {
 
 export interface ExtractDomResponseMessage {
   type: 'EXTRACT_DOM_RESPONSE';
+  success: boolean;
+  errorCode?: string;
   schema: SanitizedSchema;
   elementsCount: number;
   domSignals: any[]; // Changed from any to any[]

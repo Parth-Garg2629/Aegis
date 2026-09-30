@@ -15,15 +15,11 @@ export class StableIdRegistry {
       return existing;
     }
 
-    let candidateId: string;
-    const nativeId = element.id ? element.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_') : '';
-    if (nativeId && !this.idToElement.has(`el-${nativeId}`)) {
-      candidateId = `el-${nativeId}`;
-    } else {
+    // Page-authored IDs may embed emails, account numbers, or other user data.
+    // Use opaque per-document capabilities instead of forwarding those IDs.
+    let candidateId = `el-${this.counter++}`;
+    while (this.idToElement.has(candidateId)) {
       candidateId = `el-${this.counter++}`;
-      while (this.idToElement.has(candidateId)) {
-        candidateId = `el-${this.counter++}`;
-      }
     }
 
     this.elementToId.set(element, candidateId);

@@ -45,10 +45,14 @@ class OllamaProvider(VLMProvider):
         url: str = "http://127.0.0.1:11434",
         model: str = "qwen3-vl:4b",
         timeout_seconds: float = 300.0,
+        num_ctx: int = 8192,
     ):
         self.url = url.rstrip("/")
         self.model_name = model
         self.timeout_seconds = timeout_seconds
+        if num_ctx < 4096:
+            raise ValueError("num_ctx must be at least 4096 tokens")
+        self.num_ctx = num_ctx
 
     # ------------------------------------------------------------------
     # PROMPT
@@ -359,15 +363,44 @@ class OllamaProvider(VLMProvider):
             )
 
         except httpx.HTTPStatusError as exc:
+            # Ollama's error body can echo request data. Extract only known-safe
+            # numeric diagnostics; never log its free-form message/body.
+            diagnostics: Dict[str, Any] = {}
+            try:
+                body = exc.response.json()
+                error_value = body.get("error") if isinstance(body, dict) else None
+                if isinstance(error_value, str):
+                    try:
+                        error_value = json.loads(error_value)
+                    except json.JSONDecodeError:
+                        error_value = None
+                if isinstance(error_value, dict):
+                    nested = error_value.get("error", error_value)
+                    if isinstance(nested, dict):
+                        error_code = nested.get("code")
+                        error_type = nested.get("type")
+                        prompt_tokens = nested.get("n_prompt_tokens")
+                        context_limit = nested.get("n_ctx")
+                        if isinstance(error_code, int):
+                            diagnostics["ollama_error_code"] = error_code
+                        if isinstance(error_type, str) and len(error_type) <= 80:
+                            diagnostics["ollama_error_type"] = error_type
+                        if isinstance(prompt_tokens, int):
+                            diagnostics["prompt_tokens"] = prompt_tokens
+                        if isinstance(context_limit, int):
+                            diagnostics["context_limit"] = context_limit
+            except (ValueError, TypeError):
+                pass
             slog.error(
                 module="OLLAMA",
                 event="HTTP_ERROR",
                 status_code=exc.response.status_code,
+                **diagnostics,
             )
 
             return False, ActionObject(
                 action_type="fail",
-                reasoning="VLM HTTP request failed.",
+                reasoning=f"OLLAMA_HTTP_{exc.response.status_code}: Ollama rejected the inference request.",
             )
 
         except httpx.RequestError:
@@ -480,6 +513,7 @@ class OllamaProvider(VLMProvider):
             "options": {
                 "temperature": 0.0,
                 "top_p": 0.8,
+                "num_ctx": self.num_ctx,
             },
 
             # Qwen3 supports thinking control.
@@ -498,6 +532,10 @@ class OllamaProvider(VLMProvider):
         success, action = self._call_ollama(payload, context.step_number, 1)
 
         if success:
+            return action
+        # HTTP 4xx responses are deterministic request rejections. Repeating
+        # the same payload cannot recover and only adds latency/load.
+        if action.reasoning and action.reasoning.startswith("OLLAMA_HTTP_4"):
             return action
 
         # --------------------------------------------------------------
@@ -551,4 +589,5 @@ ollama_vlm_provider = OllamaProvider(
             "300",
         )
     ),
+    num_ctx=int(os.environ.get("OLLAMA_NUM_CTX", "8192")),
 )

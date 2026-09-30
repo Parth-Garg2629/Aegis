@@ -120,6 +120,38 @@ def test_ollama_double_failure_returns_fail():
         assert mock_post.call_count == 2
 
 
+def test_ollama_request_configures_context_window():
+    """The qwen3-vl request must exceed Ollama's 4096-token default when needed."""
+    provider = OllamaProvider(num_ctx=8192)
+    with patch("httpx.Client.post") as mock_post:
+        mock_post.return_value = MockResponse({"message": {"content": '{"action_type":"done"}'}})
+        provider.generate_action(dummy_context(), goal="test")
+
+    payload = mock_post.call_args.kwargs["json"]
+    assert payload["options"]["num_ctx"] == 8192
+    assert payload["format"] == ActionObject.model_json_schema()
+
+
+def test_ollama_http_400_is_diagnostic_and_not_retried():
+    provider = OllamaProvider()
+    response = httpx.Response(
+        400,
+        json={"error": '{"error":{"code":400,"type":"exceed_context_size_error","n_prompt_tokens":6711,"n_ctx":4096}}'},
+        request=httpx.Request("POST", "http://127.0.0.1:11434/api/chat"),
+    )
+
+    with patch("httpx.Client.post", side_effect=httpx.HTTPStatusError("bad request", request=response.request, response=response)) as post, \
+         patch("aegis_server.providers.ollama.slog.error") as log_error:
+        action = provider.generate_action(dummy_context(), goal="test")
+
+    assert action.action_type == "fail"
+    assert action.reasoning.startswith("OLLAMA_HTTP_400:")
+    assert post.call_count == 1
+    assert log_error.call_args.kwargs["prompt_tokens"] == 6711
+    assert log_error.call_args.kwargs["context_limit"] == 4096
+    assert "message" not in log_error.call_args.kwargs
+
+
 def test_output_normalization():
     """Action with uppercase type, untrimmed strings -> normalized."""
     provider = OllamaProvider()

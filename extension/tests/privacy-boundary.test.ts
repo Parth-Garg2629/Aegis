@@ -38,12 +38,15 @@ describe('Privacy Boundary Integration (D1-D5)', () => {
         {
           id: 'pwd1',
           value: rawPassword, // Password
+          attributes: { value: rawPassword, 'data-secret': rawEmail },
         },
         {
           id: 'phone1',
           value: `My phone is ${rawPhone}`
         }
-      ]
+      ],
+      forms: [{ id: 'form-1', action: 'https://bank.com/submit?token=123', method: 'POST', elementIds: ['pwd1'] }],
+      cookies: rawEmail,
     };
     
     // Suppose DOM analysis and heuristics generated this map
@@ -81,10 +84,12 @@ describe('Privacy Boundary Integration (D1-D5)', () => {
     expect(payloadJson).not.toContain(rawPassword);
     expect(payloadJson).not.toContain('token=123'); // URL should be stripped
     expect(payloadJson).not.toContain('data:image/png;base64,raw'); // Raw screenshot should be gone
+    expect(payloadJson).not.toContain('data-secret');
     
     // Assert placeholders are present
     expect(payloadJson).toContain('[REDACTED_EMAIL]');
     expect(payloadJson).toContain('[REDACTED_PHONE]');
     expect(payloadJson).toContain('[REDACTED_PASSWORD]');
+    expect(payloadJson).not.toContain('token=123');
   });
 });

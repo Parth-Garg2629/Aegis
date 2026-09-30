@@ -199,7 +199,15 @@ export class LoopController {
       throw new Error(`Cannot start loop while in state "${this.state}"`);
     }
 
-    this.goal = goal;
+    const goalScan = scanGoal(goal);
+    this.goal = goalScan.sanitizedGoal;
+    if (goalScan.hasSensitiveContent) {
+      slog.warn({
+        module: 'LOOP_CONTROLLER',
+        event: 'GOAL_CONTAINS_SENSITIVE_CONTENT',
+        categories: goalScan.categories,
+      });
+    }
     this.currentStep = 0;
     this.previousResult = null;
     this.transition('starting');
@@ -592,7 +600,7 @@ export class LoopController {
       });
 
       if (!executionResult.success) {
-        this.finish('agent_failed');
+        this.finish('agent_failed', executionResult.error_code ?? 'EXECUTION_FAILED');
         break;
       }
 
@@ -701,7 +709,7 @@ export class LoopController {
           throw new Error('E-DOM-TAB-ACCESS-DENIED');
         }
       }
-      if (response && response.schema) {
+      if (response?.success === true && response.schema) {
         slog.info({ module: 'LOOP_CONTROLLER', event: 'DOM_EXTRACTION_END', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, duration_ms: Math.round(performance.now() - startedAt), element_count: response.schema.elements.length, status: 'success', success: true });
         return {
            schema: response.schema,
@@ -709,9 +717,15 @@ export class LoopController {
            piiSignals: response.piiSignals || []
         };
       }
+      if (response && response.success === false) {
+        throw new Error(`E-${response.errorCode || 'DOM_EXTRACTION_FAILED'}`);
+      }
     } catch (err) {
       const errorText = err instanceof Error ? err.message : '';
-      const errorCode = errorText === 'E-DOM-TAB-ACCESS-DENIED'
+      const responseErrorCode = errorText.match(/^E-([A-Z0-9_-]+)$/)?.[1];
+      const errorCode = responseErrorCode
+        ? responseErrorCode
+        : errorText === 'E-DOM-TAB-ACCESS-DENIED'
         ? 'TAB_ACCESS_DENIED'
         : errorText.includes('Receiving end does not exist')
         ? 'NO_CONTENT_SCRIPT'
@@ -779,8 +793,10 @@ export class LoopController {
 
   private safeFailureCode(reason?: string | null): string {
     if (!reason) return 'AGENT_ACTION_FAILED';
-    const protocolCode = reason.match(/\bE-[A-Z0-9-]+\b/);
+    const protocolCode = reason.match(/\bE-[A-Z0-9_-]+\b/);
     if (protocolCode) return protocolCode[0];
+    const ollamaHttpCode = reason.match(/\bOLLAMA_HTTP_(\d{3})\b/);
+    if (ollamaHttpCode) return `OLLAMA_HTTP_${ollamaHttpCode[1]}`;
     if (reason.includes('VLM timeout')) return 'VLM_TIMEOUT';
     if (reason.includes('Could not connect to local Ollama')) return 'OLLAMA_CONNECTION_FAILED';
     if (reason.includes('VLM HTTP request failed')) return 'OLLAMA_HTTP_FAILED';

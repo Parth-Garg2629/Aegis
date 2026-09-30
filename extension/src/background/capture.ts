@@ -1,4 +1,7 @@
 import { slog } from '@aegis/shared';
+import { captureFailureCode } from './capture-error';
+
+export { captureFailureCode } from './capture-error';
 
 export const MINIMAL_WEBP_BASE64 =
   'data:image/webp;base64,UklGRiQAAABXRUJQVlA4IBgAAAAwAQCdASoBAAEAAgA0JaQAA3AA/vuUAAA=';
@@ -14,6 +17,7 @@ export interface CaptureResult {
 export async function captureActiveTab(tabId?: number, sessionId?: string, stepNumber?: number): Promise<CaptureResult> {
   const startedAt = performance.now();
   const correlation = sessionId && stepNumber !== undefined ? `${sessionId}:${stepNumber}` : undefined;
+  let failureCode: 'E-CAPTURE-PERMISSION' | 'E-CAPTURE-UNAVAILABLE' = 'E-CAPTURE-UNAVAILABLE';
   slog.info({ module: 'SCREENSHOT_CAPTURE', event: 'CAPTURE_START', session_id: sessionId, step_number: stepNumber, correlation_id: correlation, status: 'started' });
   try {
     if (typeof chrome !== 'undefined' && chrome.tabs && chrome.tabs.captureVisibleTab) {
@@ -45,15 +49,24 @@ export async function captureActiveTab(tabId?: number, sessionId?: string, stepN
       return result;
     }
   } catch (err: unknown) {
+    failureCode = captureFailureCode(err);
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    // Chrome API errors are useful for debugging capture permissions. Strip
+    // URLs and cap length so a failure cannot copy private page locations to
+    // logs or the popup.
+    const safeMessage = rawMessage
+      .replace(/(?:https?|data):[^\s"']+/gi, '[URL]')
+      .slice(0, 180);
     slog.warn({
       module: 'SCREENSHOT_CAPTURE',
       event: 'CAPTURE_ERROR',
       session_id: sessionId, step_number: stepNumber, correlation_id: correlation,
-      error_code: 'CAPTURE_FAILED',
+      error_code: failureCode,
+      reason: safeMessage,
       duration_ms: Math.round(performance.now() - startedAt),
       status: 'error', success: false,
     });
   }
-  slog.error({ module: 'SCREENSHOT_CAPTURE', event: 'CAPTURE_END', session_id: sessionId, step_number: stepNumber, correlation_id: correlation, duration_ms: Math.round(performance.now() - startedAt), error_code: 'CAPTURE_UNAVAILABLE', status: 'error', success: false });
-  throw new Error('E-CAPTURE-UNAVAILABLE');
+  slog.error({ module: 'SCREENSHOT_CAPTURE', event: 'CAPTURE_END', session_id: sessionId, step_number: stepNumber, correlation_id: correlation, duration_ms: Math.round(performance.now() - startedAt), error_code: failureCode, status: 'error', success: false });
+  throw new Error(failureCode);
 }

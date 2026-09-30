@@ -24,8 +24,6 @@ export class SanitizationError extends Error {
 }
 
 export async function buildSanitizedContext(input: PrivacyBuildInput): Promise<Sanitized<ContextUpdatePayload>> {
-  const strictMode = input.strictMode ?? true;
-
   try {
     // 1. Sanitize Screenshot
     const screenshotResult = await sanitizeScreenshot(input.rawDataUrl, input.sensitivityMap, input.dpr);
@@ -43,22 +41,7 @@ export async function buildSanitizedContext(input: PrivacyBuildInput): Promise<S
         error_code: 'E-SAN-02',
         reason: `Found ${verification.defectCount} surviving PII defects at paths: ${verification.fieldPaths.join(', ')}`
       });
-
-      // 4. Fallback replacement of defects
-      // In a robust implementation, we would trace the path and replace. For now, we replace string-wide in JSON if needed, or rely on strictMode.
-      // 5. Fail-closed on strict mode
-      if (strictMode) {
-        slog.warn({
-          module: 'PRIVACY_BUILDER',
-          event: 'STRICT_FALLBACK_SCRUB',
-          defect_count: verification.defectCount
-        });
-        const scrubbedSchema = {
-          ...sanitizedSchema,
-          elements: sanitizedSchema.elements.map(el => ({ ...el, value: null, text: null }))
-        };
-        Object.assign(sanitizedSchema, scrubbedSchema);
-      }
+      throw new SanitizationError('Schema verification failed');
     }
     
     // 6. Generate proof

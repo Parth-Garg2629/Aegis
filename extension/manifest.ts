@@ -21,13 +21,6 @@ export function generateManifest() {
       default_popup: 'popup.html',
       default_title: 'AEGIS Agent',
     },
-    content_scripts: [
-      {
-        matches: ['<all_urls>'],
-        js: ['content.js'],
-        run_at: 'document_idle',
-      },
-    ],
     content_security_policy: {
       extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
     },

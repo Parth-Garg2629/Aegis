@@ -93,6 +93,10 @@ export async function sanitizeScreenshot(
       }
     }
 
+    if (failedRegions > 0) {
+      throw new Error(`Failed to redact ${failedRegions} sensitive screenshot region(s)`);
+    }
+
     // Downscale if necessary (e.g. to 1280x720 max bounds if needed, but per spec: downscale to 1280x720)
     // Downscale if necessary
     const MAX_W = 1024;
