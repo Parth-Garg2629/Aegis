@@ -174,7 +174,12 @@ class CloudProvider(VLMProvider):
                         "model": self.model_name,
                         "messages": self._build_messages(context, goal, action_history),
                         "temperature": 0,
-                        "max_tokens": 300,
+                        # Reasoning models spend part of their completion budget
+                        # before producing the JSON action. 300 tokens often
+                        # leaves no user-facing content, which OpenRouter returns
+                        # as message.content=null.
+                        "max_tokens": 800,
+                        "reasoning": {"effort": "low"},
                         "response_format": {
                             "type": "json_schema",
                             "json_schema": {
@@ -222,12 +227,28 @@ class CloudProvider(VLMProvider):
                     else "empty"
                 )
                 response_length = len(content) if isinstance(content, str) else None
+                usage = result.get("usage") if isinstance(result, dict) else None
+                message_keys = sorted(message.keys()) if isinstance(message, dict) else []
                 slog.error(
                     module="OPENROUTER",
                     event="INVALID_ACTION_RESPONSE",
                     response_shape=response_shape,
                     response_length=response_length,
                     finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+                    choices_count=len(choices) if isinstance(choices, list) else 0,
+                    message_keys=message_keys,
+                    completion_tokens=(
+                        usage.get("completion_tokens")
+                        if isinstance(usage, dict)
+                        and isinstance(usage.get("completion_tokens"), int)
+                        else None
+                    ),
+                    actual_model=(
+                        result.get("model")
+                        if isinstance(result, dict)
+                        and isinstance(result.get("model"), str)
+                        else None
+                    ),
                 )
                 return fail_action
 

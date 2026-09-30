@@ -38,6 +38,10 @@ ALLOWED_LOG_FIELDS = {
     "ollama_error_type",
     "prompt_tokens",
     "context_limit",
+    "choices_count",
+    "message_keys",
+    "completion_tokens",
+    "actual_model",
 }
 
 LogSink = Callable[[Dict[str, Any]], None]
