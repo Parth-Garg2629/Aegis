@@ -747,6 +747,42 @@ export class LoopController {
 
 
   private async executeActionInActiveTab(action: ActionObject): Promise<ActionResultPayload> {
+    // ── Handle stateless actions directly in the SW ──────────────────────────
+    // 'wait' and global 'scroll' (no target) do not need a live content script.
+    // Handling them here avoids E-EXEC-02 when the content script is temporarily
+    // unloaded during a page navigation triggered by a preceding type+Enter.
+    if (action.action_type === 'wait') {
+      const ms = action.value ? parseInt(action.value, 10) : 1000;
+      const delay = isNaN(ms) ? 1000 : Math.min(Math.max(ms, 200), 5000);
+      slog.info({
+        module: 'LOOP_CONTROLLER',
+        event: 'WAIT_ACTION_SW',
+        delay_ms: delay,
+        step_number: this.currentStep,
+      });
+      await new Promise<void>((resolve) => setTimeout(resolve, delay));
+      return { step_number: this.currentStep, action_type: 'wait', success: true };
+    }
+
+    if (action.action_type === 'scroll' && !action.target) {
+      // Global scroll — inject a tiny script directly rather than messaging.
+      // Falls back to content-script path if scripting API is unavailable.
+      if (this.activeTabId && typeof chrome !== 'undefined' && chrome.scripting?.executeScript) {
+        const direction = action.value === 'up' ? -400 : 400;
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: this.activeTabId },
+            func: (dy: number) => window.scrollBy({ top: dy, behavior: 'instant' }),
+            args: [direction],
+          });
+          return { step_number: this.currentStep, action_type: 'scroll', success: true };
+        } catch {
+          // Fall through to content-script path
+        }
+      }
+    }
+
+    // ── All other actions: delegate to the content script ───────────────────
     if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs) {
       return {
         step_number: this.currentStep,
@@ -768,17 +804,19 @@ export class LoopController {
         return response.result;
       }
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       slog.error({
         module: 'LOOP_CONTROLLER',
         event: 'EXECUTION_DISPATCH_FAILED',
-        message: err instanceof Error ? err.message : String(err),
+        message: errMsg,
+        error_code: 'E-EXEC-02',
       });
       return {
         step_number: this.currentStep,
         action_type: action.action_type,
         success: false,
         error_code: 'E-EXEC-02',
-        error_message: err instanceof Error ? err.message : String(err),
+        error_message: errMsg,
       };
     }
 
