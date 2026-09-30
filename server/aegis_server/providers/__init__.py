@@ -38,7 +38,7 @@ def get_configured_provider() -> VLMProvider:
             module="PROVIDER_FACTORY",
             event="PROVIDER_SELECTED",
             provider="openrouter",
-            model=provider.model_name,
+            model_name=provider.model_name,
         )
         return provider
     else:
