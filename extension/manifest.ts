@@ -13,7 +13,9 @@ export function generateManifest() {
     version: '1.0.0',
     description: 'On-device visual perception and privacy sanitization for browser agents',
     permissions: [...APPROVED_PERMISSIONS],
-    host_permissions: ['https://aegis-api-2jgt.onrender.com/*'],
+    // AEGIS follows links across websites, so it needs host access on normal
+    // HTTP/HTTPS pages beyond the current active tab.
+    host_permissions: ['http://*/*', 'https://*/*'],
     background: {
       service_worker: 'sw.js',
       type: 'module',
