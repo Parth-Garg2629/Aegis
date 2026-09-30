@@ -10,7 +10,7 @@ import os
 from aegis_server.providers.base import VLMProvider
 from aegis_server.providers.mock import mock_vlm_provider
 from aegis_server.providers.ollama import ollama_vlm_provider
-from aegis_server.providers.cloud import cloud_provider
+from aegis_server.providers.cloud import CloudProvider
 from aegis_server.slog import slog
 
 
@@ -25,11 +25,22 @@ def get_configured_provider() -> VLMProvider:
         slog.info(module="PROVIDER_FACTORY", event="PROVIDER_SELECTED", provider="ollama")
         return ollama_vlm_provider
     elif provider_name == "cloud":
-        if cloud_provider is None:
-            slog.error(module="PROVIDER_FACTORY", event="CLOUD_PROVIDER_INIT_FAILED", reason="Missing VLM_API_KEY")
+        try:
+            provider = CloudProvider()
+        except (ValueError, TypeError):
+            slog.error(
+                module="PROVIDER_FACTORY",
+                event="CLOUD_PROVIDER_INIT_FAILED",
+                reason="Missing or invalid OpenRouter configuration",
+            )
             return mock_vlm_provider
-        slog.info(module="PROVIDER_FACTORY", event="PROVIDER_SELECTED", provider="cloud")
-        return cloud_provider
+        slog.info(
+            module="PROVIDER_FACTORY",
+            event="PROVIDER_SELECTED",
+            provider="openrouter",
+            model=provider.model_name,
+        )
+        return provider
     else:
         # Default fallback to mock
         if provider_name == "mock":

@@ -103,7 +103,18 @@ $env:OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 $env:OLLAMA_MODEL = "qwen3-vl:4b"
 ```
 
-`OLLAMA_BASE_URL`, `OLLAMA_MODEL`, and `OLLAMA_TIMEOUT_SECONDS` configure the Ollama provider. `AEGIS_AUTH_TOKEN` optionally enables token checking for WebSocket connections. Without it, the service skips authentication, so keep the service bound to localhost for development. The cloud provider is a stub and does not implement remote inference.
+`OLLAMA_BASE_URL`, `OLLAMA_MODEL`, and `OLLAMA_TIMEOUT_SECONDS` configure the Ollama provider. `AEGIS_AUTH_TOKEN` optionally enables token checking for WebSocket connections. Without it, the service skips authentication, so keep the service bound to localhost for development.
+
+For OpenRouter inference, set these variables on the backend host. Keep the API key server-side and never add it to the extension or source control:
+
+```text
+VLM_PROVIDER=cloud
+VLM_API_KEY=<your OpenRouter API key>
+VLM_API_BASE_URL=https://openrouter.ai/api/v1
+VLM_MODEL=openrouter/free
+```
+
+The free router can change the selected model and has provider-side quotas. It accepts images when a vision-capable free model is available. AEGIS sends the sanitized screenshot and sanitized page schema only.
 
 `OLLAMA_NUM_CTX` sets Ollama's context window in tokens (default `8192`; minimum `4096`). The provider sends the structured ActionObject schema and only the sanitized screenshot when using a vision model.
 
@@ -132,7 +143,7 @@ The extension connects to `ws://127.0.0.1:8765/ws`. Build it, then load `extensi
 4. Review and approve any action that the risk checks flag for confirmation.
 5. Stop or cancel the run from the extension popup.
 
-The mock provider is intended for development and scripted flows. Use Ollama for model-driven task reasoning.
+The mock provider is intended for development and scripted flows. Use Ollama or OpenRouter for model-driven task reasoning.
 
 ## Troubleshooting
 
@@ -166,6 +177,7 @@ The WebSocket flow starts with `session_init` and then exchanges `context_update
 - Send both a sanitized screenshot and a sanitized structured page schema. The screenshot preserves visual layout; the schema exposes labels and interactive elements.
 - Use a WebSocket for the repeated perception and action loop, while keeping health and session inspection as HTTP endpoints.
 - Keep the reasoning provider replaceable. The mock provider simplifies development; Ollama enables local model inference.
+- Keep OpenRouter credentials on the backend. The OpenRouter provider receives only the sanitized context produced by the extension.
 - Validate actions and apply risk rules in the extension, where page actions execute.
 - Treat this repository as a prototype. The optional token check and unauthenticated inspection routes do not constitute production access control.
 
@@ -205,7 +217,7 @@ The ML scripts under `ml/` (training, benchmarking, dataset generation, ONNX exp
 - PII detection uses local heuristics, not complete OCR or semantic detection. Sensitive text in images, canvas, unusual page regions, or patterns the local detectors do not recognize can escape redaction; AEGIS cannot promise detection of every sensitive value on every site.
 - DOM extraction cannot inspect the internals of cross-origin iframes; only the rendered screenshot is available for those regions. Screenshot capture covers the visible viewport.
 - Because filled values are kept from the model, entering sensitive values already stored in a page or in the task text is not supported; a secure local value-entry mechanism is not implemented.
-- The cloud provider is only a stub. Remote inference is not implemented.
+- The OpenRouter provider depends on external model availability, free-tier quotas, and network access. It does not guarantee uninterrupted inference.
 - The mock provider does not provide general-purpose reasoning.
 - Production deployment, hardened authentication, and broader threat testing remain future work.
 
