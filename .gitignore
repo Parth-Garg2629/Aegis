@@ -39,6 +39,10 @@ pnpm-debug.log*
 temp/
 scratch/
 
+# Local Ollama request/response captures can include prompts, page content, or screenshots.
+ollama_payload*.json
+server/resp*.json
+
 # Environment Variables & Secrets
 .env
 .env.*
