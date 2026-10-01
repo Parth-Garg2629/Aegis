@@ -66,6 +66,8 @@ class Session:
         self.last_action_was_search = False
         self.last_action_was_external_link = False
         self.last_action_was_logout = False
+        self.last_action_was_profile_menu = False
+        self.logout_menu_open = False
         self.last_action_was_login = False
 
         # Latest context buffer

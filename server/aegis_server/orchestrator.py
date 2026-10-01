@@ -128,7 +128,11 @@ def _element_action_text(element) -> str:
     )
 
 
-def _logout_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
+def _logout_fallback(
+    goal: str,
+    context: ContextUpdatePayload,
+    allow_profile_menu: bool = True,
+) -> Optional[ActionObject]:
     """Choose only a clearly labeled logout control or profile menu for logout goals."""
     if not _LOGOUT_GOAL.search(goal):
         return None
@@ -155,6 +159,9 @@ def _logout_fallback(goal: str, context: ContextUpdatePayload) -> Optional[Actio
             reasoning="Click the clearly labeled logout control.",
         )
 
+    if not allow_profile_menu:
+        return None
+
     profile_menu = next(
         (element for element in candidates if _PROFILE_MENU_CONTROL.search(_element_action_text(element))),
         None,
@@ -176,6 +183,16 @@ def _action_targets_logout(action: ActionObject, context: ContextUpdatePayload) 
         None,
     )
     return bool(element and _LOGOUT_CONTROL.search(_element_action_text(element)))
+
+
+def _action_targets_profile_menu(action: ActionObject, context: ContextUpdatePayload) -> bool:
+    if action.action_type != "click" or not action.target:
+        return False
+    element = next(
+        (item for item in context.sanitized_schema.elements if item.id == action.target),
+        None,
+    )
+    return bool(element and _PROFILE_MENU_CONTROL.search(_element_action_text(element)))
 
 
 def _login_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
@@ -404,7 +421,20 @@ class AgentOrchestrator:
             # menu when needed, then click its explicit logout control. A model
             # guess at either step can otherwise fail before logout is reached.
             if _LOGOUT_GOAL.search(session.goal):
-                logout_action = _logout_fallback(session.goal, context)
+                menu_was_open_after_success = bool(
+                    session.logout_menu_open
+                    and context.previous_action_result
+                    and context.previous_action_result.success
+                )
+                logout_action = _logout_fallback(
+                    session.goal,
+                    context,
+                    allow_profile_menu=not (
+                        session.logout_menu_open
+                        and context.previous_action_result
+                        and context.previous_action_result.success
+                    ),
+                )
                 if logout_action:
                     action = logout_action
                     slog.info(
@@ -419,10 +449,42 @@ class AgentOrchestrator:
                         target_element_id=logout_action.target,
                     )
 
+                # Never toggle the same account menu closed by clicking it a
+                # second time while looking for a logout item. Let the refreshed
+                # DOM/screenshot reach the model instead.
+                if (
+                    menu_was_open_after_success
+                    and action.action_type == "fail"
+                ):
+                    action = ActionObject(
+                        action_type="wait",
+                        value="500",
+                        reasoning="Wait for the opened account menu to become available.",
+                    )
+                elif (
+                    menu_was_open_after_success
+                    and _action_targets_profile_menu(action, context)
+                ):
+                    action = ActionObject(
+                        action_type="wait",
+                        value="500",
+                        reasoning="Keep the opened account menu open while locating logout.",
+                    )
+
             if action.action_type == "fail":
                 fallback = (
                     _search_fallback(session.goal, context)
-                    or _logout_fallback(session.goal, context)
+                    or _logout_fallback(
+                        session.goal,
+                        context,
+                        allow_profile_menu=not (
+                            session.logout_menu_open
+                            and context.previous_action_result
+                            and context.previous_action_result.success
+                        )
+                        if _LOGOUT_GOAL.search(session.goal)
+                        else True,
+                    )
                     or _login_fallback(session.goal, context)
                 )
                 if fallback:
@@ -467,6 +529,11 @@ class AgentOrchestrator:
             session.last_action_was_search = _action_targets_search_field(action, context)
             session.last_action_was_external_link = _action_targets_external_link(action, context)
             session.last_action_was_logout = _action_targets_logout(action, context)
+            session.last_action_was_profile_menu = _action_targets_profile_menu(action, context)
+            if session.last_action_was_profile_menu:
+                session.logout_menu_open = True
+            elif session.last_action_was_logout:
+                session.logout_menu_open = False
             session.last_action_was_login = _action_targets_login_control(action, context)
 
             slog.info(
