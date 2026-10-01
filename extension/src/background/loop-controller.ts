@@ -649,20 +649,21 @@ export class LoopController {
       return { valid: false, reason: 'Could not re-extract live DOM for validation' };
     }
 
-    // OAuth can finish and redirect back while the user is approving the
-    // external-navigation confirmation. In that case the old target is stale
-    // because login already succeeded; never retry the approved click.
-    if (this.isLoginGoal() && this.isAuthenticatedLinkedInPage(liveSchema)) {
-      return {
-        valid: false,
-        reason: 'LinkedIn login completed during confirmation',
-        loginAlreadyCompleted: true,
-      };
-    }
-
     // 1. Target must still exist in current DOM
     const liveEl = liveSchema.elements.find((el) => el.id === targetId);
     if (!liveEl) {
+      // A login redirect can complete while the approval dialog is open. The
+      // approved control then disappears from the old page; don't report that
+      // stale target as a failed login if the browser has already left the
+      // login flow. This check is site-neutral and only runs after the target
+      // disappears, so it cannot skip an action on the original page.
+      if (this.isLoginGoal() && this.isCompletedLoginRedirect(originalSchema, liveSchema)) {
+        return {
+          valid: false,
+          reason: 'Login completed while confirmation was pending',
+          loginAlreadyCompleted: true,
+        };
+      }
       return { valid: false, reason: `Target element "${targetId}" no longer exists in live DOM (stale target)` };
     }
 
@@ -691,40 +692,33 @@ export class LoopController {
     return /\b(log\s*in|login|sign\s*in|authenticate)\b/i.test(this.goal);
   }
 
-  private isAuthenticatedLinkedInPage(schema: SanitizedSchema): boolean {
-    let pageUrl: URL;
+  private isCompletedLoginRedirect(originalSchema: SanitizedSchema, liveSchema: SanitizedSchema): boolean {
+    let originalUrl: URL;
+    let liveUrl: URL;
     try {
-      pageUrl = new URL(schema.url);
+      originalUrl = new URL(originalSchema.url);
+      liveUrl = new URL(liveSchema.url);
     } catch {
       return false;
     }
-    if (!/(^|\.)linkedin\.com$/i.test(pageUrl.hostname)) return false;
+    if (originalUrl.href === liveUrl.href) return false;
 
-    if (/\/feed(?:\/|$)/i.test(pageUrl.pathname)) return true;
-    const hasLogoutControl = schema.elements.some((element) => {
-      const attrs = element.attributes || {};
-      const accessibleText = [
-        element.label,
-        element.text,
-        attrs['aria-label'],
-        attrs.title,
-      ].filter(Boolean).join(' ');
-      return /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(accessibleText);
-    });
-    if (hasLogoutControl) return true;
+    const route = `${liveUrl.hostname}${liveUrl.pathname}`;
+    if (/\b(?:login|log-in|signin|sign-in|auth|oauth|authorize|challenge|checkpoint|verify|consent)\b/i.test(route)) {
+      return false;
+    }
 
-    const hasMeControl = schema.elements.some((element) => {
-      const attrs = element.attributes || {};
-      return /^\s*me\s*$/i.test([element.label, element.text, attrs['aria-label']].filter(Boolean).join(' '));
-    });
-    const hasAuthenticatedNav = schema.elements.some((element) =>
-      /\b(messaging|notifications|my network|jobs)\b/i.test([element.label, element.text].filter(Boolean).join(' ')),
-    );
-    const hasPasswordField = schema.elements.some((element) =>
+    const visibleControls = liveSchema.elements.filter((element) => element.isVisible && element.isInteractive);
+    const hasPasswordField = visibleControls.some((element) =>
       element.tagName.toLowerCase() === 'input' &&
       String(element.type || element.attributes?.type || '').toLowerCase() === 'password',
     );
-    return hasMeControl && hasAuthenticatedNav && !hasPasswordField;
+    const hasLoginPrompt = visibleControls.some((element) =>
+      /\b(sign\s*in|log\s*in|login|continue\s+with)\b/i.test(
+        [element.label, element.text, element.attributes?.['aria-label']].filter(Boolean).join(' '),
+      ),
+    );
+    return !hasPasswordField && !hasLoginPrompt;
   }
 
   private sendActionResultTracked(result: ActionResultPayload): void {
