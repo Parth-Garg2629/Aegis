@@ -638,6 +638,29 @@ export class LoopController {
       slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_EXECUTION_START', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, action_type: action.action_type, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, status: 'started' });
       const executionResult = await this.executeActionInActiveTab(actionForExecution);
       if (localInputProvided) executionResult.local_input_status = 'LOCAL_INPUT_PROVIDED';
+
+      // Authentication controls can submit a form and navigate/reload the
+      // document before the content script can deliver its action response.
+      // Reconcile only when the resulting page independently proves the
+      // requested login/logout transition; otherwise preserve the execution
+      // failure and its normal safety handling.
+      if (!executionResult.success && executionResult.error_code === 'E-EXEC-02') {
+        const authTransitionConfirmed = await this.confirmAuthTransitionAfterDispatchError(action, domSchema);
+        if (authTransitionConfirmed) {
+          executionResult.success = true;
+          delete executionResult.error_code;
+          delete executionResult.error_message;
+          slog.info({
+            module: 'LOOP_CONTROLLER',
+            event: 'AUTH_TRANSITION_CONFIRMED_AFTER_DISPATCH_ERROR',
+            session_id: this.wsClient.getSessionId() || undefined,
+            step_number: this.currentStep,
+            action_type: action.action_type,
+            status: 'success',
+          });
+        }
+      }
+
       slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_EXECUTION_END', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, action_type: action.action_type, duration_ms: Math.round(performance.now() - executionStartedAt), success: executionResult.success, error_code: executionResult.error_code, status: executionResult.success ? 'success' : 'failed' });
       this.previousResult = executionResult;
 
@@ -746,6 +769,95 @@ export class LoopController {
 
   private isLoginGoal(): boolean {
     return /\b(log\s*in|login|sign\s*in|authenticate)\b/i.test(this.goal);
+  }
+
+  private isLogoutGoal(): boolean {
+    return /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(this.goal);
+  }
+
+  private async confirmAuthTransitionAfterDispatchError(
+    action: ActionObject,
+    originalSchema: SanitizedSchema,
+  ): Promise<boolean> {
+    if (!action.target || !['click', 'type'].includes(action.action_type)) return false;
+
+    if (this.isLoginGoal()) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const { schema } = await this.extractDomFromActiveTab();
+          if (this.isCompletedLoginRedirect(originalSchema, schema, action.target)) return true;
+        } catch {
+          // The tab may still be crossing an authentication redirect.
+        }
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return this.isCompletedLoginRedirectWithoutDom(originalSchema);
+    }
+
+    if (!this.isLogoutGoal() || action.action_type !== 'click' ||
+        !this.isLogoutControlInSchema(originalSchema, action.target)) {
+      return false;
+    }
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const { schema } = await this.extractDomFromActiveTab();
+        if (this.isCompletedLogoutRedirect(originalSchema, schema, action.target)) return true;
+      } catch {
+        // A successful sign-out often unloads the page before its content
+        // script can answer. Retry against the new document before failing.
+      }
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+
+    return this.isCompletedLogoutRedirectWithoutDom(originalSchema, action.target);
+  }
+
+  private isLogoutControlInSchema(schema: SanitizedSchema, targetId: string): boolean {
+    const target = schema.elements.find((element) => element.id === targetId);
+    if (!target) return false;
+    const text = [target.label, target.text, target.attributes?.['aria-label'], target.attributes?.title]
+      .filter(Boolean)
+      .join(' ');
+    return /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(text);
+  }
+
+  private isCompletedLogoutRedirect(
+    originalSchema: SanitizedSchema,
+    liveSchema: SanitizedSchema,
+    targetId: string,
+  ): boolean {
+    if (!this.isLogoutControlInSchema(originalSchema, targetId)) return false;
+    const path = (() => {
+      try { return new URL(liveSchema.url).pathname; } catch { return ''; }
+    })();
+    if (/\/(?:log[-_]?out|sign[-_]?out)(?:\/|$)/i.test(path)) return true;
+
+    const visibleText = liveSchema.elements
+      .filter((element) => element.isVisible && element.isInteractive && !element.isDisabled)
+      .map((element) => [element.label, element.text, element.attributes?.['aria-label'], element.attributes?.title]
+        .filter(Boolean).join(' '))
+      .join(' ');
+    const showsSignIn = /\b(sign\s*in|log\s*in|login)\b/i.test(visibleText);
+    const stillShowsSignOut = /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(visibleText);
+    return showsSignIn && !stillShowsSignOut;
+  }
+
+  private async isCompletedLogoutRedirectWithoutDom(
+    originalSchema: SanitizedSchema,
+    targetId: string,
+  ): Promise<boolean> {
+    if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs?.get ||
+        !this.isLogoutControlInSchema(originalSchema, targetId)) return false;
+    try {
+      const tab = await chrome.tabs.get(this.activeTabId);
+      const currentUrl = new URL(tab.url || '');
+      if (!['http:', 'https:'].includes(currentUrl.protocol)) return false;
+      return /\/(?:log[-_]?out|sign[-_]?out|login|log-in|signin|sign-in)(?:\/|$)/i
+        .test(`${currentUrl.hostname}${currentUrl.pathname}`);
+    } catch {
+      return false;
+    }
   }
 
   private isCompletedLoginRedirect(originalSchema: SanitizedSchema, liveSchema: SanitizedSchema, targetId: string): boolean {
