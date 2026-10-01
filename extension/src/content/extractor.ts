@@ -15,6 +15,8 @@ const INTERACTIVE_SELECTORS = [
   '[role="button"]',
   '[role="link"]',
   '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
   '[role="textbox"]',
   '[role="checkbox"]',
   '[role="combobox"]',
@@ -122,7 +124,21 @@ function scanVisiblePageText(piiSignals: NormalizedSignal[]): void {
 }
 
 export function extractDom(): { schema: SanitizedSchema; domSignals: NormalizedSignal[]; piiSignals: NormalizedSignal[] } {
-  const rawElements = Array.from(document.querySelectorAll(INTERACTIVE_SELECTORS));
+  const rawElementSet = new Set(Array.from(document.querySelectorAll(INTERACTIVE_SELECTORS)));
+  // Some account menus (including LinkedIn's) render "Log out" as a clickable
+  // list item or labeled div instead of a native control/ARIA menuitem. Include
+  // only those exact logout-like controls so the agent can target them safely.
+  const logoutLabel = /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i;
+  for (const el of document.querySelectorAll('li, [aria-label], [title], [data-control-name]')) {
+    const text = [
+      el.textContent,
+      el.getAttribute('aria-label'),
+      el.getAttribute('title'),
+      el.getAttribute('data-control-name'),
+    ].filter(Boolean).join(' ');
+    if (logoutLabel.test(text)) rawElementSet.add(el);
+  }
+  const rawElements = Array.from(rawElementSet);
   const elements: SanitizedElement[] = [];
   const formsMap = new Map<string, { action?: string | null; method?: 'GET' | 'POST'; elementIds: string[] }>();
   

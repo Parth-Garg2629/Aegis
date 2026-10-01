@@ -145,7 +145,8 @@ def _logout_fallback(
         and not element.isDisabled
         and (
             element.tagName.lower() in {"a", "button", "input"}
-            or element.role == "menuitem"
+            or element.tagName.lower() == "li"
+            or element.role in {"menuitem", "menuitemcheckbox", "menuitemradio"}
         )
     ]
     logout_control = next(
@@ -469,24 +470,19 @@ class AgentOrchestrator:
                 # DOM/screenshot reach the model instead.
                 if (
                     menu_was_open_after_success
-                    and action.action_type == "fail"
-                ):
-                    action = ActionObject(
-                        action_type="wait",
-                        value="500",
-                        reasoning="Wait for the opened account menu to become available.",
+                    and (
+                        action.action_type == "fail"
+                        or (
+                            action.action_type == "click"
+                            and action.target == session.logout_menu_target_id
+                            and not _action_targets_logout(action, context)
+                        )
                     )
-                elif (
-                    menu_was_open_after_success
-                    and action.action_type == "click"
-                    and action.target == session.logout_menu_target_id
-                    and not _action_targets_logout(action, context)
                 ):
-                    action = ActionObject(
-                        action_type="wait",
-                        value="500",
-                        reasoning="Keep the opened account menu open while locating logout.",
-                    )
+                    action = ActionObject(action_type="fail", reasoning=(
+                        "The account menu opened, but no logout control was found in the current page snapshot. "
+                        "Logout controls must be exposed as visible menu items before continuing."
+                    ))
 
             if action.action_type == "fail":
                 fallback = (
