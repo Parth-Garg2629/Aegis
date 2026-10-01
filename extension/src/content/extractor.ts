@@ -14,6 +14,7 @@ const INTERACTIVE_SELECTORS = [
   'a[href]',
   '[role="button"]',
   '[role="link"]',
+  '[role="menuitem"]',
   '[role="textbox"]',
   '[role="checkbox"]',
   '[role="combobox"]',

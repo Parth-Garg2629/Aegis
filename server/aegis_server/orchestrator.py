@@ -139,7 +139,10 @@ def _logout_fallback(goal: str, context: ContextUpdatePayload) -> Optional[Actio
         if element.isVisible
         and element.isInteractive
         and not element.isDisabled
-        and element.tagName.lower() in {"a", "button", "input"}
+        and (
+            element.tagName.lower() in {"a", "button", "input"}
+            or element.role == "menuitem"
+        )
     ]
     logout_control = next(
         (element for element in candidates if _LOGOUT_CONTROL.search(_element_action_text(element))),
@@ -301,7 +304,10 @@ def _logout_completion_action(
     previous = context.previous_action_result
     if (
         _LOGOUT_GOAL.search(goal)
-        and previous_action_was_logout
+        and (
+            previous_action_was_logout
+            or _page_shows_logged_out_state(context)
+        )
         and previous
         and previous.success
         and previous.action_type == "click"
@@ -311,6 +317,30 @@ def _logout_completion_action(
             reasoning="The requested logout control was clicked successfully.",
         )
     return None
+
+
+def _page_shows_logged_out_state(context: ContextUpdatePayload) -> bool:
+    """Recognize a successful logout redirect even if the site's control label was opaque."""
+    schema = context.sanitized_schema
+    path = urlsplit(schema.url).path
+    if re.search(r"/(?:log[-_]?out|sign[-_]?out)(?:/|$)", path, re.I):
+        return True
+
+    visible_controls = [
+        element
+        for element in schema.elements
+        if element.isVisible and element.isInteractive and not element.isDisabled
+    ]
+    has_sign_in_control = any(
+        re.search(r"\b(sign\s*in|log\s*in|login)\b", _element_action_text(element), re.I)
+        for element in visible_controls
+    )
+    has_password_field = any(
+        element.tagName.lower() == "input"
+        and (element.type or (element.attributes or {}).get("type", "")).lower() == "password"
+        for element in visible_controls
+    )
+    return has_sign_in_control and has_password_field
 
 
 class AgentOrchestrator:
