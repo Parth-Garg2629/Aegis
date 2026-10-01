@@ -625,10 +625,24 @@ def _logout_completion_action(
     return None
 
 
+def _logout_already_complete_action(
+    goal: str,
+    context: ContextUpdatePayload,
+) -> Optional[ActionObject]:
+    """Treat a positively identified signed-out page as an idempotent logout."""
+    if _LOGOUT_GOAL.search(goal) and _page_shows_logged_out_state(context):
+        return ActionObject(
+            action_type="done",
+            reasoning="The current page already shows a signed-out state.",
+        )
+    return None
+
+
 def _page_shows_logged_out_state(context: ContextUpdatePayload) -> bool:
     """Recognize a successful logout redirect even if the site's control label was opaque."""
     schema = context.sanitized_schema
-    path = urlsplit(schema.url).path
+    page_url = urlsplit(schema.url)
+    path = page_url.path
     if re.search(r"/(?:log[-_]?out|sign[-_]?out)(?:/|$)", path, re.I):
         return True
 
@@ -645,11 +659,23 @@ def _page_shows_logged_out_state(context: ContextUpdatePayload) -> bool:
         _LOGOUT_CONTROL.search(_element_action_text(element))
         for element in visible_controls
     )
+    has_signed_out_marker = any(
+        re.search(r"\bsigned\s+out\b", _element_action_text(element), re.I)
+        for element in visible_controls
+    )
     has_password_field = any(
         element.tagName.lower() == "input"
         and (element.type or (element.attributes or {}).get("type", "")).lower() == "password"
         for element in visible_controls
     )
+    if (
+        (page_url.hostname or "").lower() == "accounts.google.com"
+        and re.search(r"/signin/accountchooser(?:/|$)", path, re.I)
+        and not has_sign_out_control
+    ):
+        return True
+    if has_signed_out_marker and not has_sign_out_control:
+        return True
     return has_sign_in_control and not has_sign_out_control and (has_password_field or bool(visible_controls))
 
 
@@ -714,6 +740,9 @@ class AgentOrchestrator:
                 session.goal,
                 context,
                 session.last_action_was_logout,
+            ) or _logout_already_complete_action(
+                session.goal,
+                context,
             ) or _linkedin_logout_navigation_action(
                 session.goal,
                 context,

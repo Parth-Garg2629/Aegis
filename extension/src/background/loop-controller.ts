@@ -794,8 +794,7 @@ export class LoopController {
       return this.isCompletedLoginRedirectWithoutDom(originalSchema);
     }
 
-    if (!this.isLogoutGoal() || action.action_type !== 'click' ||
-        !this.isLogoutControlInSchema(originalSchema, action.target)) {
+    if (!this.isLogoutGoal() || action.action_type !== 'click') {
       return false;
     }
 
@@ -827,10 +826,21 @@ export class LoopController {
     liveSchema: SanitizedSchema,
     targetId: string,
   ): boolean {
+    let liveUrl: URL;
+    let originalUrl: URL;
+    try {
+      liveUrl = new URL(liveSchema.url);
+      originalUrl = new URL(originalSchema.url);
+    } catch {
+      return false;
+    }
+    const path = liveUrl.pathname;
+    const isGoogleSignedOutChooser =
+      liveUrl.hostname.toLowerCase() === 'accounts.google.com' &&
+      /\/signin\/accountchooser(?:\/|$)/i.test(path) &&
+      liveUrl.href !== originalUrl.href;
+    if (isGoogleSignedOutChooser) return true;
     if (!this.isLogoutControlInSchema(originalSchema, targetId)) return false;
-    const path = (() => {
-      try { return new URL(liveSchema.url).pathname; } catch { return ''; }
-    })();
     if (/\/(?:log[-_]?out|sign[-_]?out)(?:\/|$)/i.test(path)) return true;
 
     const visibleText = liveSchema.elements
@@ -848,14 +858,18 @@ export class LoopController {
     originalSchema: SanitizedSchema,
     targetId: string,
   ): Promise<boolean> {
-    if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs?.get ||
-        !this.isLogoutControlInSchema(originalSchema, targetId)) return false;
+    if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs?.get) return false;
     try {
       const tab = await chrome.tabs.get(this.activeTabId);
       const currentUrl = new URL(tab.url || '');
       const originalUrl = new URL(originalSchema.url);
       if (!['http:', 'https:'].includes(currentUrl.protocol)) return false;
       if (currentUrl.href === originalUrl.href) return false;
+      if (
+        currentUrl.hostname.toLowerCase() === 'accounts.google.com' &&
+        /\/signin\/accountchooser(?:\/|$)/i.test(currentUrl.pathname)
+      ) return true;
+      if (!this.isLogoutControlInSchema(originalSchema, targetId)) return false;
       return /\/(?:log[-_]?out|sign[-_]?out|login|log-in|signin|sign-in)(?:\/|$)/i
         .test(currentUrl.pathname) ||
         ((currentUrl.hostname || '').toLowerCase() === 'accounts.google.com' &&
