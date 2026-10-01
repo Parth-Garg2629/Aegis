@@ -839,8 +839,9 @@ export class LoopController {
         .filter(Boolean).join(' '))
       .join(' ');
     const showsSignIn = /\b(sign\s*in|log\s*in|login)\b/i.test(visibleText);
+    const showsSignedOutState = /\bsigned\s+out\b/i.test(visibleText);
     const stillShowsSignOut = /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(visibleText);
-    return showsSignIn && !stillShowsSignOut;
+    return (showsSignIn || showsSignedOutState) && !stillShowsSignOut;
   }
 
   private async isCompletedLogoutRedirectWithoutDom(
@@ -852,9 +853,13 @@ export class LoopController {
     try {
       const tab = await chrome.tabs.get(this.activeTabId);
       const currentUrl = new URL(tab.url || '');
+      const originalUrl = new URL(originalSchema.url);
       if (!['http:', 'https:'].includes(currentUrl.protocol)) return false;
+      if (currentUrl.href === originalUrl.href) return false;
       return /\/(?:log[-_]?out|sign[-_]?out|login|log-in|signin|sign-in)(?:\/|$)/i
-        .test(`${currentUrl.hostname}${currentUrl.pathname}`);
+        .test(currentUrl.pathname) ||
+        ((currentUrl.hostname || '').toLowerCase() === 'accounts.google.com' &&
+          /\/signin\/accountchooser(?:\/|$)/i.test(currentUrl.pathname));
     } catch {
       return false;
     }

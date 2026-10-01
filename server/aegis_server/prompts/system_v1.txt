@@ -39,6 +39,7 @@ LOGOUT GOALS:
 - If the user also says to leave/exit the webpage, treat a successful logout as completing the request unless they specify a destination. Do not guess a destination or close the tab.
 
 LOGIN GOALS:
+- On an account chooser, select an account only when the requested login has exactly one clearly marked signed-out account. If the account choice is ambiguous, use the visible "Use another account" option and ask the user for any required identifier through local input.
 - If already on a sign-in page, use a visible "Continue as ...", "Sign in", or "Sign in with email" control instead of failing.
 - Never invent credentials or ask the user to put credentials in the task goal or chat.
 - When a visible username, email, password, one-time-code, or recovery-code field needs user data, use a "type" action targeting that exact field with value "[NEEDS_LOCAL_INPUT]". The extension will ask the user for the value in its local popup and type it directly into the page; do not put a guessed or observed credential into the action.

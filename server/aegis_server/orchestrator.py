@@ -49,7 +49,7 @@ _LOGOUT_GOAL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b"
 _LOGOUT_CONTROL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
 _PROFILE_MENU_CONTROL = re.compile(r"\b(profile|account|user\s+menu|your\s+account|my\s+account|me)\b", re.I)
 _LOGIN_GOAL = re.compile(r"\b(log\s*in|login|sign\s*in|authenticate)\b", re.I)
-_LOGIN_CONTROL = re.compile(r"\b(sign\s*in|log\s*in|continue\s+(?:as|with)|sign\s*in\s+with|login\s+with)\b", re.I)
+_LOGIN_CONTROL = re.compile(r"\b(sign\s*in|log\s*in|continue\s+(?:as|with)|sign\s*in\s+with|login\s+with|use\s+another\s+account)\b", re.I)
 
 
 def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
@@ -383,6 +383,113 @@ def _login_fallback(goal: str, context: ContextUpdatePayload) -> Optional[Action
     return None
 
 
+def _google_account_chooser_action(
+    goal: str,
+    context: ContextUpdatePayload,
+) -> Optional[ActionObject]:
+    """Select only an unambiguous signed-out account on Google's chooser page."""
+    if not _LOGIN_GOAL.search(goal):
+        return None
+    page_url = urlsplit(context.sanitized_schema.url)
+    if (page_url.hostname or "").lower() != "accounts.google.com" or not re.search(
+        r"/signin/accountchooser(?:/|$)", page_url.path, re.I
+    ):
+        return None
+
+    candidates = [
+        element
+        for element in context.sanitized_schema.elements
+        if element.isVisible
+        and element.isInteractive
+        and not element.isDisabled
+        and (
+            element.tagName.lower() in {"a", "button"}
+            or element.role in {"button", "link", "menuitem"}
+        )
+    ]
+    signed_out_accounts = [
+        element for element in candidates
+        if re.search(r"\bsigned\s+out\b", _element_action_text(element), re.I)
+    ]
+    if len(signed_out_accounts) == 1:
+        return ActionObject(
+            action_type="click",
+            target=signed_out_accounts[0].id,
+            reasoning="Continue with the single signed-out account.",
+        )
+
+    # If account selection is ambiguous or unavailable, proceed to the
+    # explicit alternate-account form so the user can provide their choice.
+    alternate_accounts = [
+        element for element in candidates
+        if re.search(r"\buse\s+another\s+account\b", _element_action_text(element), re.I)
+    ]
+    if len(alternate_accounts) == 1:
+        return ActionObject(
+            action_type="click",
+            target=alternate_accounts[0].id,
+            reasoning="Open the account sign-in form for user input.",
+        )
+    return None
+
+
+def _login_credential_input_action(
+    goal: str,
+    context: ContextUpdatePayload,
+) -> Optional[ActionObject]:
+    """Ask for credentials through the extension's local-input path."""
+    if not _LOGIN_GOAL.search(goal):
+        return None
+
+    fields = []
+    for element in context.sanitized_schema.elements:
+        if (
+            element.tagName.lower() not in {"input", "textarea"}
+            or not element.isVisible
+            or not element.isInteractive
+            or element.isDisabled
+            or element.isReadOnly
+        ):
+            continue
+        attrs = element.attributes or {}
+        hints = " ".join(
+            str(value)
+            for value in (
+                element.type,
+                element.label,
+                element.text,
+                attrs.get("type"),
+                attrs.get("autocomplete"),
+                attrs.get("aria-label"),
+                attrs.get("placeholder"),
+                attrs.get("name"),
+            )
+            if value
+        ).lower()
+        if element.value and str(element.value).startswith("[REDACTED_"):
+            continue
+
+        if re.search(r"password|current-password|new-password", hints):
+            priority = 2
+        elif re.search(r"email|username|user\s*name|identifier", hints):
+            priority = 1
+        elif re.search(r"one[- ]?time|verification|security code|authenticator|\botp\b", hints):
+            priority = 3
+        else:
+            continue
+        fields.append((priority, element))
+
+    if not fields:
+        return None
+    _priority, field = min(fields, key=lambda item: item[0])
+    return ActionObject(
+        action_type="type",
+        target=field.id,
+        value="[NEEDS_LOCAL_INPUT]",
+        reasoning="Request the required sign-in value locally.",
+    )
+
+
 def _action_targets_login_control(action: ActionObject, context: ContextUpdatePayload) -> bool:
     if action.action_type != "click" or not action.target:
         return False
@@ -616,6 +723,12 @@ class AgentOrchestrator:
                 context,
                 session.last_action_was_login,
                 session.login_flow_started,
+            ) or _google_account_chooser_action(
+                session.goal,
+                context,
+            ) or _login_credential_input_action(
+                session.goal,
+                context,
             )
             if action:
                 slog.info(
