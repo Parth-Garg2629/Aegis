@@ -29,13 +29,28 @@ export async function captureActiveTab(tabId?: number, sessionId?: string, stepN
         throw new Error('No active tab available to capture');
       }
 
-      const dataUrl = await chrome.tabs.captureVisibleTab(currentTab.windowId, {
-        format: 'jpeg',
-        quality: 85,
-      });
+      let dataUrl: string | undefined;
+      let captureError: unknown;
+      // Chrome may briefly reject captures while a tab is switching or still
+      // painting after navigation. Retry those transient failures before
+      // degrading to DOM-only operation.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          dataUrl = await chrome.tabs.captureVisibleTab(currentTab.windowId, {
+            format: 'jpeg',
+            quality: 85,
+          });
+          break;
+        } catch (error) {
+          captureError = error;
+          failureCode = captureFailureCode(error);
+          if (failureCode === 'E-CAPTURE-PERMISSION' || attempt === 2) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)));
+        }
+      }
 
       if (!dataUrl) {
-        throw new Error('E-CAPTURE-EMPTY');
+        throw captureError || new Error('E-CAPTURE-EMPTY');
       }
 
       const result: CaptureResult = {
@@ -66,7 +81,35 @@ export async function captureActiveTab(tabId?: number, sessionId?: string, stepN
       duration_ms: Math.round(performance.now() - startedAt),
       status: 'error', success: false,
     });
+    // Keep the agent usable when Chrome temporarily refuses a screenshot.
+    // The blank image contains no page pixels; sanitized DOM remains available
+    // to the offscreen pipeline for privacy checks and element targeting.
+    const fallback: CaptureResult = {
+      screenshotDataUrl: MINIMAL_WEBP_BASE64,
+      format: 'webp',
+      dpr: 1,
+      width: 1,
+      height: 1,
+    };
+    slog.warn({
+      module: 'SCREENSHOT_CAPTURE',
+      event: 'CAPTURE_DOM_ONLY_FALLBACK',
+      session_id: sessionId,
+      step_number: stepNumber,
+      correlation_id: correlation,
+      error_code: failureCode,
+      status: 'degraded',
+      success: true,
+    });
+    return fallback;
   }
-  slog.error({ module: 'SCREENSHOT_CAPTURE', event: 'CAPTURE_END', session_id: sessionId, step_number: stepNumber, correlation_id: correlation, duration_ms: Math.round(performance.now() - startedAt), error_code: failureCode, status: 'error', success: false });
-  throw new Error(failureCode);
+  const fallback: CaptureResult = {
+    screenshotDataUrl: MINIMAL_WEBP_BASE64,
+    format: 'webp',
+    dpr: 1,
+    width: 1,
+    height: 1,
+  };
+  slog.warn({ module: 'SCREENSHOT_CAPTURE', event: 'CAPTURE_DOM_ONLY_FALLBACK', session_id: sessionId, step_number: stepNumber, correlation_id: correlation, duration_ms: Math.round(performance.now() - startedAt), error_code: failureCode, status: 'degraded', success: true });
+  return fallback;
 }
