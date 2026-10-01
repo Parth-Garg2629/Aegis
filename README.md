@@ -133,7 +133,22 @@ export OLLAMA_MODEL=qwen3-vl:4b
 python -m uvicorn aegis_server.main:app --app-dir server --host 127.0.0.1 --port 8765
 ```
 
-The extension connects to `ws://127.0.0.1:8765/ws`. Build it, then load `extension/dist` as an unpacked extension from `chrome://extensions` or `edge://extensions`. If the build reports missing model assets, check the assets referenced in `extension/vite.config.ts`; the build copies them when present.
+The built extension defaults to the deployed backend at `wss://aegis-api-2jgt.onrender.com/ws`. To point it at a local backend instead, change `DEFAULT_SERVER_ENDPOINT` in `packages/shared/src/constants.ts` to `ws://127.0.0.1:8765/ws` before building. Build with `pnpm build`, then load `extension/dist` as an unpacked extension from `chrome://extensions` or `edge://extensions`. If the build reports missing model assets, check the assets referenced in `extension/vite.config.ts`; the build copies them when present.
+
+### Deploy the backend to Render
+
+The current Render web service is configured from the repository root. Use these service settings:
+
+| Render setting | Value |
+| --- | --- |
+| Root Directory | Leave blank (repository root) |
+| Build Command | `pip install .` |
+| Start Command | `uvicorn aegis_server.main:app --app-dir server --host 0.0.0.0 --port $PORT` |
+| Health Check Path | `/health` (optional) |
+
+Set the model environment variables in the Render service's Environment settings. For the deployed OpenRouter provider, configure `VLM_PROVIDER=cloud`, `VLM_API_KEY`, `VLM_API_BASE_URL=https://openrouter.ai/api/v1`, and `VLM_MODEL=openrouter/free`. Keep the API key in Render's secret environment variables; never commit it.
+
+After deployment, check that the deploy status is **Live** and that `https://<your-service>.onrender.com/health` returns HTTP 200 with `"status":"ok"`. A request to `/` returns 404 by design. Free Render instances can spin down while idle, so their next request may have a cold-start delay.
 
 ## Usage
 
