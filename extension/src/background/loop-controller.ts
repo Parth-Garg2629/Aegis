@@ -707,7 +707,11 @@ export class LoopController {
     let liveSchema: SanitizedSchema | null = null;
     let extractionError: unknown;
     const loginGoal = this.isLoginGoal();
-    const maxAttempts = loginGoal ? 10 : 1;
+    // Login providers can finish their redirect or update an SPA several
+    // seconds after the approved control disappears. Keep polling that
+    // transition long enough to observe the authenticated page before calling
+    // the target stale (450 ms between attempts, up to roughly 13.5 seconds).
+    const maxAttempts = loginGoal ? 30 : 1;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const { schema } = await this.extractDomFromActiveTab();
