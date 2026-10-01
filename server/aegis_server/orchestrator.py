@@ -383,6 +383,21 @@ class AgentOrchestrator:
             if session.current_step > session.max_steps:
                 return ActionObject(action_type="fail", reasoning="Maximum steps reached"), None
 
+            # The action result arrives with the next context. Remember a
+            # successful first click in a logout flow as an open-menu attempt,
+            # even when the site's menu button is labeled only "Me" or an icon.
+            previous_result = context.previous_action_result
+            if (
+                _LOGOUT_GOAL.search(session.goal)
+                and session.logout_menu_target_id
+                and not session.last_action_was_logout
+                and previous_result
+                and previous_result.success
+                and previous_result.action_type == "click"
+                and previous_result.target_element_id == session.logout_menu_target_id
+            ):
+                session.logout_menu_open = True
+
             # Finish search-only goals when the previous search-field action
             # succeeded. Goals with an explicit follow-up remain with the VLM.
             action = _search_completion_action(
@@ -463,7 +478,9 @@ class AgentOrchestrator:
                     )
                 elif (
                     menu_was_open_after_success
-                    and _action_targets_profile_menu(action, context)
+                    and action.action_type == "click"
+                    and action.target == session.logout_menu_target_id
+                    and not _action_targets_logout(action, context)
                 ):
                     action = ActionObject(
                         action_type="wait",
@@ -532,6 +549,12 @@ class AgentOrchestrator:
             session.last_action_was_profile_menu = _action_targets_profile_menu(action, context)
             if session.last_action_was_profile_menu:
                 session.logout_menu_open = True
+            if _LOGOUT_GOAL.search(session.goal) and action.action_type == "click":
+                if session.last_action_was_logout:
+                    session.logout_menu_open = False
+                    session.logout_menu_target_id = None
+                else:
+                    session.logout_menu_target_id = action.target
             elif session.last_action_was_logout:
                 session.logout_menu_open = False
             session.last_action_was_login = _action_targets_login_control(action, context)

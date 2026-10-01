@@ -68,6 +68,7 @@ class Session:
         self.last_action_was_logout = False
         self.last_action_was_profile_menu = False
         self.logout_menu_open = False
+        self.logout_menu_target_id: Optional[str] = None
         self.last_action_was_login = False
 
         # Latest context buffer
