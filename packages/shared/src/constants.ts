@@ -23,6 +23,7 @@ export const ACTION_TYPES = [
   'scroll',
   'select',
   'hover',
+  'navigate',
   'wait',
   'done',
   'fail',

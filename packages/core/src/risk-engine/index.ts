@@ -17,6 +17,22 @@ export function evaluateActionRisk(action: ActionObject, schema: SanitizedSchema
     return { level: 'safe' };
   }
 
+  if (action.action_type === 'navigate') {
+    try {
+      const destination = new URL(action.value || '');
+      const current = new URL(schema.url);
+      if (destination.protocol !== 'http:' && destination.protocol !== 'https:') {
+        return { level: 'blocked', reason: 'Invalid navigation URL' };
+      }
+      if (destination.hostname.toLowerCase() !== current.hostname.toLowerCase()) {
+        return { level: 'high_risk', matchedCategory: 'HR-08', reason: 'External navigation requires confirmation' };
+      }
+      return { level: 'safe' };
+    } catch {
+      return { level: 'blocked', reason: 'Invalid navigation URL' };
+    }
+  }
+
   // 2. Check blocked patterns
   const BLOCKED_PATTERNS = ["javascript:", "<script", ['ev', 'al('].join(''), "onclick="];
   if (action.action_type === 'type' && action.value) {

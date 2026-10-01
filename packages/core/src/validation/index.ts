@@ -6,7 +6,7 @@ export interface ValidationResult {
 }
 
 const ALLOWED_ACTIONS: ActionType[] = [
-  'click', 'type', 'scroll', 'select', 'hover', 'wait', 'done', 'fail'
+  'click', 'type', 'scroll', 'select', 'hover', 'navigate', 'wait', 'done', 'fail'
 ];
 
 export function validateAction(action: ActionObject): ValidationResult {
@@ -44,6 +44,19 @@ export function validateAction(action: ActionObject): ValidationResult {
       }
       if (typeof action.value !== 'string') {
         return { valid: false, error: `select requires a string value` };
+      }
+      break;
+    case 'navigate':
+      if (typeof action.value !== 'string') {
+        return { valid: false, error: 'navigate requires a URL value' };
+      }
+      try {
+        const url = new URL(action.value);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+          return { valid: false, error: 'navigate only supports HTTP or HTTPS URLs' };
+        }
+      } catch {
+        return { valid: false, error: 'navigate requires a valid URL' };
       }
       break;
     case 'wait':

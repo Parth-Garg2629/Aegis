@@ -110,6 +110,7 @@ export type ActionType =
   | 'scroll'
   | 'select'
   | 'hover'
+  | 'navigate'
   | 'wait'
   | 'done'
   | 'fail';
@@ -258,6 +259,7 @@ export function validateActionObject(action: unknown): action is ActionObject {
     'scroll',
     'select',
     'hover',
+    'navigate',
     'wait',
     'done',
     'fail',
@@ -279,6 +281,15 @@ export function validateActionObject(action: unknown): action is ActionObject {
     case 'select':
       if (typeof a.target !== 'string' || !a.target) return false;
       if (typeof a.value !== 'string') return false;
+      break;
+    case 'navigate':
+      if (typeof a.value !== 'string') return false;
+      try {
+        const url = new URL(a.value);
+        if (!['http:', 'https:'].includes(url.protocol)) return false;
+      } catch {
+        return false;
+      }
       break;
     case 'wait':
     case 'done':

@@ -5,6 +5,7 @@ Deterministic risk classification for VLM actions.
 """
 
 from typing import Optional, Tuple
+from urllib.parse import urlsplit
 from aegis_server.protocol import ActionObject, ContextUpdatePayload, RiskAssessment
 
 class RiskEngine:
@@ -30,6 +31,19 @@ class RiskEngine:
         try:
             # 1. Safe actions by default
             if action.action_type in {"wait", "done", "fail", "scroll"}:
+                return RiskAssessment(level="safe")
+
+            if action.action_type == "navigate":
+                destination = urlsplit(action.value or "")
+                current = urlsplit(context.sanitized_schema.url or "")
+                if destination.scheme not in {"http", "https"} or not destination.hostname:
+                    return RiskAssessment(level="blocked", reason="Invalid navigation URL")
+                if destination.hostname.lower() != (current.hostname or "").lower():
+                    return RiskAssessment(
+                        level="high_risk",
+                        category="HR-08",
+                        reason="External navigation requires confirmation",
+                    )
                 return RiskAssessment(level="safe")
 
             # 2. Check blocked patterns

@@ -25,9 +25,24 @@ _SEARCH_GOAL_FOLLOW_UP = re.compile(
     re.IGNORECASE,
 )
 _FIRST_LINK_GOAL = re.compile(
-    r"\b(?:(?:go|open|visit|click|navigate)\b.*\b(?:first|top)\b.*\b(?:link|result|url)\b|(?:first|top)\s+(?:link|result|url)\b)",
+    r"\b(?:(?:go|open|visit|click|navigate)\b.*\b(?:first|top)\b.*\b(?:link|result|url|website|site|page)\b|(?:first|top)\s+(?:link|result|url|website|site|page)\b)",
     re.IGNORECASE,
 )
+_OPEN_WEBSITE_GOAL = re.compile(
+    r"\b(?:open|go\s+to|visit|navigate\s+to)\s+(?:the\s+)?(?P<site>[a-z0-9][a-z0-9.-]*)\s+(?:website|site|homepage)\b",
+    re.IGNORECASE,
+)
+_KNOWN_WEBSITE_DOMAINS = {
+    "linkedin": "linkedin.com",
+    "google": "google.com",
+    "wikipedia": "wikipedia.org",
+    "amazon": "amazon.com",
+    "facebook": "facebook.com",
+    "instagram": "instagram.com",
+    "youtube": "youtube.com",
+    "github": "github.com",
+    "reddit": "reddit.com",
+}
 _LOGOUT_GOAL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
 _LOGOUT_CONTROL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
 _PROFILE_MENU_CONTROL = re.compile(r"\b(profile|account|user\s+menu|your\s+account|my\s+account)\b", re.I)
@@ -112,6 +127,72 @@ def _action_targets_external_link(action: ActionObject, context: ContextUpdatePa
     target_host = urlsplit(href).hostname
     page_host = urlsplit(context.sanitized_schema.url).hostname
     return bool(target_host and page_host and target_host.lower() != page_host.lower())
+
+
+def _website_navigation_action(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
+    match = _OPEN_WEBSITE_GOAL.search(goal)
+    if not match:
+        return None
+    site = match.group("site").strip(".").lower()
+    host = _KNOWN_WEBSITE_DOMAINS.get(site, site if "." in site else f"{site}.com")
+    current_host = urlsplit(context.sanitized_schema.url).hostname or ""
+    if current_host.lower() == host or current_host.lower().endswith(f".{host}"):
+        return ActionObject(action_type="done", reasoning="The requested website is already open.")
+    return ActionObject(
+        action_type="navigate",
+        value=f"https://{host}/",
+        reasoning="Open the website explicitly requested by the user.",
+    )
+
+
+def _first_link_action(
+    goal: str,
+    context: ContextUpdatePayload,
+    previous_search_succeeded: bool,
+    wait_count: int,
+) -> Optional[ActionObject]:
+    if not (_FIRST_LINK_GOAL.search(goal) and _SEARCH_GOAL.match(goal) and previous_search_succeeded):
+        return None
+    for element in context.sanitized_schema.elements:
+        if element.tagName.lower() != "a" or not element.isVisible or not element.isInteractive:
+            continue
+        href = str((element.attributes or {}).get("href", ""))
+        if not href.startswith(("http://", "https://")):
+            continue
+        host = (urlsplit(href).hostname or "").lower()
+        page_host = (urlsplit(context.sanitized_schema.url).hostname or "").lower()
+        search_engine_hosts = (
+            "google.com",
+            "bing.com",
+            "duckduckgo.com",
+            "search.yahoo.com",
+        )
+        is_search_engine_link = any(
+            host == engine or host.endswith(f".{engine}")
+            for engine in search_engine_hosts
+        )
+        if (
+            not host
+            or host == page_host
+            or is_search_engine_link
+            or not _element_action_text(element).strip()
+        ):
+            continue
+        return ActionObject(
+            action_type="click",
+            target=element.id,
+            reasoning="Open the first visible external search result as requested.",
+        )
+    if wait_count == 0:
+        return ActionObject(
+            action_type="wait",
+            value="1500",
+            reasoning="Wait briefly for the search results page to finish loading.",
+        )
+    return ActionObject(
+        action_type="fail",
+        reasoning="Search results did not expose a visible first website link.",
+    )
 
 
 def _element_action_text(element) -> str:
@@ -409,6 +490,15 @@ class AgentOrchestrator:
                 session.goal,
                 context,
                 session.last_action_was_external_link,
+            ) or _first_link_action(
+                session.goal,
+                context,
+                session.pending_first_link
+                and bool(context.previous_action_result and context.previous_action_result.success),
+                session.first_link_wait_count,
+            ) or _website_navigation_action(
+                session.goal,
+                context,
             ) or _logout_completion_action(
                 session.goal,
                 context,
@@ -540,7 +630,17 @@ class AgentOrchestrator:
                 return ActionObject(action_type="fail", reasoning=f"Action blocked by risk engine: {risk_assessment.reason}"), risk_assessment
 
             session.last_action_was_search = _action_targets_search_field(action, context)
+            if session.last_action_was_search and _FIRST_LINK_GOAL.search(session.goal):
+                session.pending_first_link = True
+                session.first_link_wait_count = 0
             session.last_action_was_external_link = _action_targets_external_link(action, context)
+            if session.last_action_was_external_link:
+                session.pending_first_link = False
+                session.first_link_wait_count = 0
+            elif session.pending_first_link and action.action_type == "wait":
+                session.first_link_wait_count += 1
+            if action.action_type == "navigate":
+                session.expected_navigation_host = urlsplit(action.value or "").hostname
             session.last_action_was_logout = _action_targets_logout(action, context)
             session.last_action_was_profile_menu = _action_targets_profile_menu(action, context)
             if session.last_action_was_profile_menu:

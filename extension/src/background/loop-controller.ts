@@ -802,6 +802,54 @@ export class LoopController {
     // 'wait' and global 'scroll' (no target) do not need a live content script.
     // Handling them here avoids E-EXEC-02 when the content script is temporarily
     // unloaded during a page navigation triggered by a preceding type+Enter.
+    if (action.action_type === 'navigate') {
+      if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs?.update) {
+        return {
+          step_number: this.currentStep,
+          action_type: 'navigate',
+          success: false,
+          error_code: 'E-EXEC-03',
+          error_message: 'No active browser tab is available for navigation',
+        };
+      }
+      let destination: URL;
+      try {
+        destination = new URL(action.value || '');
+        if (!['http:', 'https:'].includes(destination.protocol)) throw new Error('Only HTTP and HTTPS navigation is allowed');
+      } catch (error) {
+        return {
+          step_number: this.currentStep,
+          action_type: 'navigate',
+          success: false,
+          error_code: 'E-EXEC-01',
+          error_message: error instanceof Error ? error.message : 'Invalid navigation URL',
+        };
+      }
+
+      let finishLoad!: () => void;
+      const loaded = new Promise<void>((resolve) => { finishLoad = resolve; });
+      const onUpdated = (tabId: number, changeInfo: chrome.tabs.TabChangeInfo): void => {
+        if (tabId === this.activeTabId && changeInfo.status === 'complete') finishLoad();
+      };
+      chrome.tabs.onUpdated.addListener(onUpdated);
+      try {
+        await chrome.tabs.update(this.activeTabId, { url: destination.href });
+        await Promise.race([loaded, new Promise<void>((resolve) => setTimeout(resolve, 15000))]);
+        return { step_number: this.currentStep, action_type: 'navigate', success: true };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          step_number: this.currentStep,
+          action_type: 'navigate',
+          success: false,
+          error_code: 'E-EXEC-02',
+          error_message: message,
+        };
+      } finally {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+      }
+    }
+
     if (action.action_type === 'wait') {
       const ms = action.value ? parseInt(action.value, 10) : 1000;
       const delay = isNaN(ms) ? 1000 : Math.min(Math.max(ms, 200), 5000);

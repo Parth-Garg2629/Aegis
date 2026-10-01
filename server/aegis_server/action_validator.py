@@ -6,6 +6,7 @@ and structural rules before returning them to the client.
 """
 
 import re
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from typing import Optional
 
@@ -31,7 +32,7 @@ class ActionValidator:
     def validate_action(self, action: ActionObject, context: ContextUpdatePayload) -> ValidationResult:
         # 1. Closed action vocabulary is handled by ActionObject pydantic schema itself during parsing,
         # but if we get an action object constructed directly, we validate it here.
-        valid_types = {"click", "type", "scroll", "select", "hover", "wait", "done", "fail"}
+        valid_types = {"click", "type", "scroll", "select", "hover", "navigate", "wait", "done", "fail"}
         if action.action_type not in valid_types:
             return ValidationResult(False, "E-VAL-01", f"Invalid action_type: {action.action_type}")
 
@@ -51,6 +52,13 @@ class ActionValidator:
                 return ValidationResult(False, "E-VAL-03", "Action select requires a target")
             if action.value is None:
                 return ValidationResult(False, "E-VAL-04", "Action select requires a value")
+
+        if action.action_type == "navigate":
+            if not action.value:
+                return ValidationResult(False, "E-VAL-04", "Navigation requires a URL")
+            parsed = urlsplit(action.value)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                return ValidationResult(False, "E-VAL-07", "Navigation URL must use HTTP or HTTPS")
 
         if action.action_type == "scroll":
             if action.value not in {"up", "down"}:

@@ -121,7 +121,7 @@ class ContextUpdateMessage(BaseEnvelope):
     payload: ContextUpdatePayload  # type: ignore[override]
 
 
-ActionType = Literal["click", "type", "scroll", "select", "hover", "wait", "done", "fail"]
+ActionType = Literal["click", "type", "scroll", "select", "hover", "navigate", "wait", "done", "fail"]
 
 
 class ActionObject(BaseModel):
