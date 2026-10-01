@@ -73,6 +73,8 @@ class Session:
         self.pending_first_link = False
         self.first_link_wait_count = 0
         self.expected_navigation_host: Optional[str] = None
+        self.logout_navigation_started = False
+        self.login_flow_started = False
 
         # Latest context buffer
         self.latest_context: Optional[ContextUpdatePayload] = None

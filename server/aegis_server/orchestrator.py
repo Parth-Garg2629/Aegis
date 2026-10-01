@@ -45,9 +45,9 @@ _KNOWN_WEBSITE_DOMAINS = {
 }
 _LOGOUT_GOAL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
 _LOGOUT_CONTROL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
-_PROFILE_MENU_CONTROL = re.compile(r"\b(profile|account|user\s+menu|your\s+account|my\s+account)\b", re.I)
+_PROFILE_MENU_CONTROL = re.compile(r"\b(profile|account|user\s+menu|your\s+account|my\s+account|me)\b", re.I)
 _LOGIN_GOAL = re.compile(r"\b(log\s*in|login|sign\s*in|authenticate)\b", re.I)
-_LOGIN_CONTROL = re.compile(r"\b(sign\s*in|log\s*in|continue\s+as)\b", re.I)
+_LOGIN_CONTROL = re.compile(r"\b(sign\s*in|log\s*in|continue\s+(?:as|with)|sign\s*in\s+with|login\s+with)\b", re.I)
 
 
 def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
@@ -142,6 +142,41 @@ def _website_navigation_action(goal: str, context: ContextUpdatePayload) -> Opti
         action_type="navigate",
         value=f"https://{host}/",
         reasoning="Open the website explicitly requested by the user.",
+    )
+
+
+def _linkedin_logout_navigation_action(
+    goal: str,
+    context: ContextUpdatePayload,
+    navigation_started: bool = False,
+) -> Optional[ActionObject]:
+    if not _LOGOUT_GOAL.search(goal):
+        return None
+    page_url = urlsplit(context.sanitized_schema.url)
+    host = (page_url.hostname or "").lower()
+    if not (host == "linkedin.com" or host.endswith(".linkedin.com")):
+        return None
+    if _page_shows_logged_out_state(context):
+        previous = context.previous_action_result
+        if previous and previous.success and previous.action_type == "navigate":
+            return ActionObject(action_type="done", reasoning="LinkedIn is showing its signed-out page.")
+    previous = context.previous_action_result
+    if (
+        navigation_started
+        and previous
+        and previous.success
+        and previous.action_type == "navigate"
+    ):
+        return ActionObject(
+            action_type="fail",
+            reasoning="LinkedIn did not show a signed-out page after its sign-out route loaded.",
+        )
+    # LinkedIn's own sign-out control routes through /m/logout/. This fallback
+    # is used only for an explicit logout request on a LinkedIn page.
+    return ActionObject(
+        action_type="navigate",
+        value=f"https://{host}/m/logout/",
+        reasoning="Open LinkedIn's sign-out route for the requested logout.",
     )
 
 
@@ -319,30 +354,53 @@ def _login_completion_action(
     goal: str,
     context: ContextUpdatePayload,
     previous_action_was_login: bool,
+    login_flow_started: bool = False,
 ) -> Optional[ActionObject]:
     previous = context.previous_action_result
     if not (
         _LOGIN_GOAL.search(goal)
-        and previous_action_was_login
+        and (previous_action_was_login or login_flow_started)
         and previous
         and previous.success
-        and previous.action_type == "click"
+        and previous.action_type in {"click", "type", "navigate"}
     ):
         return None
 
-    page_host = urlsplit(context.sanitized_schema.url).hostname or ""
-    page_path = urlsplit(context.sanitized_schema.url).path.lower()
-    if not page_host.endswith("linkedin.com"):
-        return None
-    if re.search(r"/feed(?:/|$)", page_path) or any(
-        _LOGOUT_CONTROL.search(_element_action_text(element))
-        for element in context.sanitized_schema.elements
-    ):
+    if _is_linkedin_authenticated_context(context):
         return ActionObject(
             action_type="done",
             reasoning="LinkedIn shows the authenticated session.",
         )
     return None
+
+
+def _is_linkedin_authenticated_context(context: ContextUpdatePayload) -> bool:
+    page_url = urlsplit(context.sanitized_schema.url)
+    host = (page_url.hostname or "").lower()
+    if not (host == "linkedin.com" or host.endswith(".linkedin.com")):
+        return False
+    if re.search(r"/feed(?:/|$)", page_url.path, re.I):
+        return True
+    elements = [
+        element for element in context.sanitized_schema.elements
+        if element.isVisible and element.isInteractive
+    ]
+    if any(_LOGOUT_CONTROL.search(_element_action_text(element)) for element in elements):
+        return True
+    has_me_control = any(
+        re.search(r"^\s*me\s*$", _element_action_text(element), re.I)
+        for element in elements
+    )
+    has_authenticated_nav = any(
+        re.search(r"\b(messaging|notifications|my network|jobs)\b", _element_action_text(element), re.I)
+        for element in elements
+    )
+    has_password_field = any(
+        element.tagName.lower() == "input"
+        and (element.type or (element.attributes or {}).get("type", "")).lower() == "password"
+        for element in elements
+    )
+    return has_me_control and has_authenticated_nav and not has_password_field
 
 
 def _search_completion_action(
@@ -503,10 +561,15 @@ class AgentOrchestrator:
                 session.goal,
                 context,
                 session.last_action_was_logout,
+            ) or _linkedin_logout_navigation_action(
+                session.goal,
+                context,
+                session.logout_navigation_started,
             ) or _login_completion_action(
                 session.goal,
                 context,
                 session.last_action_was_login,
+                session.login_flow_started,
             )
             if action:
                 slog.info(
@@ -526,7 +589,9 @@ class AgentOrchestrator:
             # Follow the visible logout path deterministically: open the account
             # menu when needed, then click its explicit logout control. A model
             # guess at either step can otherwise fail before logout is reached.
-            if _LOGOUT_GOAL.search(session.goal):
+            current_host = (urlsplit(context.sanitized_schema.url).hostname or "").lower()
+            on_linkedin = current_host == "linkedin.com" or current_host.endswith(".linkedin.com")
+            if _LOGOUT_GOAL.search(session.goal) and not on_linkedin:
                 menu_was_open_after_success = bool(
                     session.logout_menu_open
                     and context.previous_action_result
@@ -654,6 +719,14 @@ class AgentOrchestrator:
             elif session.last_action_was_logout:
                 session.logout_menu_open = False
             session.last_action_was_login = _action_targets_login_control(action, context)
+            if _LOGIN_GOAL.search(session.goal) and action.action_type in {"click", "type", "navigate"}:
+                session.login_flow_started = True
+            if (
+                _LOGOUT_GOAL.search(session.goal)
+                and action.action_type == "navigate"
+                and on_linkedin
+            ):
+                session.logout_navigation_started = True
 
             slog.info(
                 module="ORCHESTRATOR",

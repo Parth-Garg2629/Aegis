@@ -701,7 +701,7 @@ export class LoopController {
     if (!/(^|\.)linkedin\.com$/i.test(pageUrl.hostname)) return false;
 
     if (/\/feed(?:\/|$)/i.test(pageUrl.pathname)) return true;
-    return schema.elements.some((element) => {
+    const hasLogoutControl = schema.elements.some((element) => {
       const attrs = element.attributes || {};
       const accessibleText = [
         element.label,
@@ -711,6 +711,20 @@ export class LoopController {
       ].filter(Boolean).join(' ');
       return /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(accessibleText);
     });
+    if (hasLogoutControl) return true;
+
+    const hasMeControl = schema.elements.some((element) => {
+      const attrs = element.attributes || {};
+      return /^\s*me\s*$/i.test([element.label, element.text, attrs['aria-label']].filter(Boolean).join(' '));
+    });
+    const hasAuthenticatedNav = schema.elements.some((element) =>
+      /\b(messaging|notifications|my network|jobs)\b/i.test([element.label, element.text].filter(Boolean).join(' ')),
+    );
+    const hasPasswordField = schema.elements.some((element) =>
+      element.tagName.toLowerCase() === 'input' &&
+      String(element.type || element.attributes?.type || '').toLowerCase() === 'password',
+    );
+    return hasMeControl && hasAuthenticatedNav && !hasPasswordField;
   }
 
   private sendActionResultTracked(result: ActionResultPayload): void {
