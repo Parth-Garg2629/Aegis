@@ -69,6 +69,7 @@ class Session:
         self.last_action_was_profile_menu = False
         self.logout_menu_open = False
         self.logout_menu_target_id: Optional[str] = None
+        self.logout_menu_wait_count = 0
         self.last_action_was_login = False
         self.pending_first_link = False
         self.first_link_wait_count = 0

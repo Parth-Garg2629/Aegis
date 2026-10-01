@@ -403,7 +403,7 @@ def _google_account_chooser_action(
         and element.isInteractive
         and not element.isDisabled
         and (
-            element.tagName.lower() in {"a", "button"}
+            element.tagName.lower() in {"a", "button", "div", "li"}
             or element.role in {"button", "link", "menuitem"}
         )
     ]
@@ -551,7 +551,16 @@ def _is_authenticated_context(context: ContextUpdatePayload) -> bool:
         and (element.type or (element.attributes or {}).get("type", "")).lower() == "password"
         for element in elements
     )
-    return bool(account_controls and has_authenticated_nav and not has_password_field)
+    has_sign_in_control = any(
+        re.search(r"\b(sign\s*in|log\s*in|login)\b", _element_action_text(element), re.I)
+        for element in elements
+    )
+    return bool(
+        account_controls
+        and has_authenticated_nav
+        and not has_password_field
+        and not has_sign_in_control
+    )
 
 
 def _search_completion_action(
@@ -822,10 +831,18 @@ class AgentOrchestrator:
                         )
                     )
                 ):
-                    action = ActionObject(action_type="fail", reasoning=(
-                        "The account menu opened, but no logout control was found in the current page snapshot. "
-                        "Logout controls must be exposed as visible menu items before continuing."
-                    ))
+                    if session.logout_menu_wait_count == 0:
+                        session.logout_menu_wait_count += 1
+                        action = ActionObject(
+                            action_type="wait",
+                            value="1000",
+                            reasoning="Wait for the opened account menu to finish rendering before looking for sign out.",
+                        )
+                    else:
+                        action = ActionObject(action_type="fail", reasoning=(
+                            "The account menu opened, but no logout control appeared after waiting for it to render. "
+                            "The page snapshot does not expose a safe sign-out target."
+                        ))
 
             if action.action_type == "fail":
                 fallback = (
@@ -902,8 +919,10 @@ class AgentOrchestrator:
                 if session.last_action_was_logout:
                     session.logout_menu_open = False
                     session.logout_menu_target_id = None
+                    session.logout_menu_wait_count = 0
                 else:
                     session.logout_menu_target_id = action.target
+                    session.logout_menu_wait_count = 0
             elif session.last_action_was_logout:
                 session.logout_menu_open = False
             session.last_action_was_login = _action_targets_login_control(action, context)
