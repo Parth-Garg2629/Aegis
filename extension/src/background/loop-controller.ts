@@ -649,21 +649,20 @@ export class LoopController {
       return { valid: false, reason: 'Could not re-extract live DOM for validation' };
     }
 
+    // If authentication redirected the tab while approval was pending, finish
+    // the requested login before checking whether the old page's click target
+    // still exists. The approved click must not be replayed on the new page.
+    if (this.isLoginGoal() && this.isCompletedLoginRedirect(originalSchema, liveSchema)) {
+      return {
+        valid: false,
+        reason: 'Login completed while confirmation was pending',
+        loginAlreadyCompleted: true,
+      };
+    }
+
     // 1. Target must still exist in current DOM
     const liveEl = liveSchema.elements.find((el) => el.id === targetId);
     if (!liveEl) {
-      // A login redirect can complete while the approval dialog is open. The
-      // approved control then disappears from the old page; don't report that
-      // stale target as a failed login if the browser has already left the
-      // login flow. This check is site-neutral and only runs after the target
-      // disappears, so it cannot skip an action on the original page.
-      if (this.isLoginGoal() && this.isCompletedLoginRedirect(originalSchema, liveSchema)) {
-        return {
-          valid: false,
-          reason: 'Login completed while confirmation was pending',
-          loginAlreadyCompleted: true,
-        };
-      }
       return { valid: false, reason: `Target element "${targetId}" no longer exists in live DOM (stale target)` };
     }
 
@@ -701,24 +700,36 @@ export class LoopController {
     } catch {
       return false;
     }
-    if (originalUrl.href === liveUrl.href) return false;
-
     const route = `${liveUrl.hostname}${liveUrl.pathname}`;
-    if (/\b(?:login|log-in|signin|sign-in|auth|oauth|authorize|challenge|checkpoint|verify|consent)\b/i.test(route)) {
-      return false;
-    }
-
     const visibleControls = liveSchema.elements.filter((element) => element.isVisible && element.isInteractive);
     const hasPasswordField = visibleControls.some((element) =>
       element.tagName.toLowerCase() === 'input' &&
       String(element.type || element.attributes?.type || '').toLowerCase() === 'password',
     );
+    const controlText = visibleControls.map((element) => [
+      element.label,
+      element.text,
+      element.attributes?.['aria-label'],
+      element.attributes?.title,
+    ].filter(Boolean).join(' ')).join(' ');
+    const hasSignOutControl = /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(controlText);
+    const hasAccountControl = /\b(profile|account|user\s+menu|my\s+account)\b|\bme\b/i.test(controlText);
+    const hasAuthenticatedNavigation = /\b(messages?|messaging|notifications?|my network|jobs|dashboard|workspace|projects|feed)\b/i.test(controlText);
+    const isAuthenticatedRoute = /\/(?:feed|dashboard)(?:\/|$)/i.test(liveUrl.pathname);
+    if (hasSignOutControl || isAuthenticatedRoute || (hasAccountControl && hasAuthenticatedNavigation && !hasPasswordField)) {
+      return true;
+    }
+
+    if (originalUrl.href === liveUrl.href || hasPasswordField) return false;
+    if (/\b(?:login|log-in|signin|sign-in|auth|oauth|authorize|challenge|checkpoint|verify|consent)\b/i.test(route)) {
+      return false;
+    }
     const hasLoginPrompt = visibleControls.some((element) =>
       /\b(sign\s*in|log\s*in|login|continue\s+with)\b/i.test(
         [element.label, element.text, element.attributes?.['aria-label']].filter(Boolean).join(' '),
       ),
     );
-    return !hasPasswordField && !hasLoginPrompt;
+    return !hasLoginPrompt;
   }
 
   private sendActionResultTracked(result: ActionResultPayload): void {
