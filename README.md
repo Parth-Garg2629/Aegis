@@ -165,6 +165,7 @@ The mock provider is intended for development and scripted flows. Use Ollama or 
 - The backend serves its health check at `http://127.0.0.1:8765/health`. A `404` at `/` is expected; there is no web page at the root URL.
 - For Ollama-backed runs, keep the Ollama service running and confirm the model is installed with `ollama list`. Start or restart the AEGIS backend after setting `VLM_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, and, if needed, `OLLAMA_NUM_CTX`.
 - Ollama HTTP failures are reported with their status code. Context overflow diagnostics include only token counts and the server context limit; prompts, page content, screenshots, and raw model output are not logged.
+- If an approved login finishes a Google account-chooser redirect to YouTube, the extension verifies signed-in page markers and completes the goal without replaying the now-stale approved target. A remaining sign-in prompt, password form, or verification step is not treated as successful login.
 - If a later Start click appears to do nothing, inspect the extension service worker console for `SESSION_START_REQUESTED`, `WEBSOCKET_OPEN`, and `NEXT_CYCLE_START`, and check the backend for `SESSION_INITIALIZED` and `CONTEXT_UPDATE_RECEIVED`. These event names help distinguish a popup/worker handoff issue from a provider request failure.
 - After rebuilding the extension, click **Reload** for the unpacked extension in `chrome://extensions`, then refresh the target page so Chrome injects the rebuilt content script.
 
