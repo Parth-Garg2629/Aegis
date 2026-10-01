@@ -370,6 +370,25 @@ class AgentOrchestrator:
                     action_history=list(session.action_history)
                 )
 
+            # Follow the visible logout path deterministically: open the account
+            # menu when needed, then click its explicit logout control. A model
+            # guess at either step can otherwise fail before logout is reached.
+            if _LOGOUT_GOAL.search(session.goal):
+                logout_action = _logout_fallback(session.goal, context)
+                if logout_action:
+                    action = logout_action
+                    slog.info(
+                        module="ORCHESTRATOR",
+                        event=(
+                            "VISIBLE_LOGOUT_CONTROL_SELECTED"
+                            if _action_targets_logout(logout_action, context)
+                            else "VISIBLE_ACCOUNT_MENU_SELECTED_FOR_LOGOUT"
+                        ),
+                        session_id=session.session_id,
+                        step_number=context.step_number,
+                        target_element_id=logout_action.target,
+                    )
+
             if action.action_type == "fail":
                 fallback = (
                     _search_fallback(session.goal, context)

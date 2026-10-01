@@ -520,6 +520,20 @@ export class LoopController {
 
         const liveValidation = await this.performLiveDomValidation(action, domSchema);
         if (!liveValidation.valid) {
+          if (liveValidation.loginAlreadyCompleted) {
+            slog.info({
+              module: 'LOOP_CONTROLLER',
+              event: 'LOGIN_COMPLETION_CONFIRMED_AFTER_REDIRECT',
+              step_number: this.currentStep,
+            });
+            this.sendActionResultTracked({
+              step_number: this.currentStep,
+              action_type: action.action_type,
+              success: true,
+            });
+            this.finish('goal_achieved');
+            break;
+          }
           slog.warn({
             module: 'LOOP_CONTROLLER',
             event: 'LIVE_DOM_VALIDATION_FAILED',
@@ -618,7 +632,7 @@ export class LoopController {
   private async performLiveDomValidation(
     action: ActionObject,
     originalSchema: SanitizedSchema,
-  ): Promise<{ valid: boolean; reason: string }> {
+  ): Promise<{ valid: boolean; reason: string; loginAlreadyCompleted?: boolean }> {
     const targetId = action.target;
 
     // Actions without a specific target (wait, scroll without target) are always valid
@@ -633,6 +647,17 @@ export class LoopController {
       liveSchema = schema;
     } catch {
       return { valid: false, reason: 'Could not re-extract live DOM for validation' };
+    }
+
+    // OAuth can finish and redirect back while the user is approving the
+    // external-navigation confirmation. In that case the old target is stale
+    // because login already succeeded; never retry the approved click.
+    if (this.isLoginGoal() && this.isAuthenticatedLinkedInPage(liveSchema)) {
+      return {
+        valid: false,
+        reason: 'LinkedIn login completed during confirmation',
+        loginAlreadyCompleted: true,
+      };
     }
 
     // 1. Target must still exist in current DOM
@@ -660,6 +685,32 @@ export class LoopController {
     }
 
     return { valid: true, reason: '' };
+  }
+
+  private isLoginGoal(): boolean {
+    return /\b(log\s*in|login|sign\s*in|authenticate)\b/i.test(this.goal);
+  }
+
+  private isAuthenticatedLinkedInPage(schema: SanitizedSchema): boolean {
+    let pageUrl: URL;
+    try {
+      pageUrl = new URL(schema.url);
+    } catch {
+      return false;
+    }
+    if (!/(^|\.)linkedin\.com$/i.test(pageUrl.hostname)) return false;
+
+    if (/\/feed(?:\/|$)/i.test(pageUrl.pathname)) return true;
+    return schema.elements.some((element) => {
+      const attrs = element.attributes || {};
+      const accessibleText = [
+        element.label,
+        element.text,
+        attrs['aria-label'],
+        attrs.title,
+      ].filter(Boolean).join(' ');
+      return /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(accessibleText);
+    });
   }
 
   private sendActionResultTracked(result: ActionResultPayload): void {
