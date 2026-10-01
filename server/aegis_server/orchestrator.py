@@ -366,41 +366,42 @@ def _login_completion_action(
     ):
         return None
 
-    if _is_linkedin_authenticated_context(context):
+    if _is_authenticated_context(context):
         return ActionObject(
             action_type="done",
-            reasoning="LinkedIn shows the authenticated session.",
+            reasoning="The page shows an authenticated session.",
         )
     return None
 
 
-def _is_linkedin_authenticated_context(context: ContextUpdatePayload) -> bool:
+def _is_authenticated_context(context: ContextUpdatePayload) -> bool:
     page_url = urlsplit(context.sanitized_schema.url)
-    host = (page_url.hostname or "").lower()
-    if not (host == "linkedin.com" or host.endswith(".linkedin.com")):
-        return False
-    if re.search(r"/feed(?:/|$)", page_url.path, re.I):
-        return True
     elements = [
         element for element in context.sanitized_schema.elements
         if element.isVisible and element.isInteractive
     ]
     if any(_LOGOUT_CONTROL.search(_element_action_text(element)) for element in elements):
         return True
-    has_me_control = any(
-        re.search(r"^\s*me\s*$", _element_action_text(element), re.I)
-        for element in elements
+    if re.search(r"/(?:feed|home|dashboard)(?:/|$)", page_url.path, re.I):
+        return True
+    account_controls = [
+        element for element in elements
+        if _PROFILE_MENU_CONTROL.search(_element_action_text(element))
+    ]
+    authenticated_nav = re.compile(
+        r"\b(messages?|messaging|notifications?|dashboard|my\s+account|my\s+profile|"
+        r"workspace|projects|settings|feed|home)\b",
+        re.I,
     )
     has_authenticated_nav = any(
-        re.search(r"\b(messaging|notifications|my network|jobs)\b", _element_action_text(element), re.I)
-        for element in elements
+        authenticated_nav.search(_element_action_text(element)) for element in elements
     )
     has_password_field = any(
         element.tagName.lower() == "input"
         and (element.type or (element.attributes or {}).get("type", "")).lower() == "password"
         for element in elements
     )
-    return has_me_control and has_authenticated_nav and not has_password_field
+    return bool(account_controls and has_authenticated_nav and not has_password_field)
 
 
 def _search_completion_action(
@@ -461,13 +462,11 @@ def _logout_completion_action(
     previous = context.previous_action_result
     if (
         _LOGOUT_GOAL.search(goal)
-        and (
-            previous_action_was_logout
-            or _page_shows_logged_out_state(context)
-        )
         and previous
         and previous.success
-        and previous.action_type == "click"
+        and previous.action_type in {"click", "navigate"}
+        and (previous_action_was_logout or previous.action_type == "navigate")
+        and _page_shows_logged_out_state(context)
     ):
         return ActionObject(
             action_type="done",
@@ -492,12 +491,16 @@ def _page_shows_logged_out_state(context: ContextUpdatePayload) -> bool:
         re.search(r"\b(sign\s*in|log\s*in|login)\b", _element_action_text(element), re.I)
         for element in visible_controls
     )
+    has_sign_out_control = any(
+        _LOGOUT_CONTROL.search(_element_action_text(element))
+        for element in visible_controls
+    )
     has_password_field = any(
         element.tagName.lower() == "input"
         and (element.type or (element.attributes or {}).get("type", "")).lower() == "password"
         for element in visible_controls
     )
-    return has_sign_in_control and has_password_field
+    return has_sign_in_control and not has_sign_out_control and (has_password_field or bool(visible_controls))
 
 
 class AgentOrchestrator:
