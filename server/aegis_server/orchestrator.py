@@ -68,6 +68,27 @@ def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[Actio
                 value=query[:500],
                 reasoning="Use the visible search field for the requested search.",
             )
+
+    # Some sites, including Wikipedia layouts with collapsed search, expose a
+    # launcher first and reveal the text field only after it is opened.
+    search_launcher = next(
+        (
+            element
+            for element in context.sanitized_schema.elements
+            if element.isVisible
+            and element.isInteractive
+            and not element.isDisabled
+            and element.tagName.lower() in {"button", "a"}
+            and re.search(r"\bsearch\b", _element_action_text(element), re.I)
+        ),
+        None,
+    )
+    if search_launcher:
+        return ActionObject(
+            action_type="click",
+            target=search_launcher.id,
+            reasoning="Open the visible search control to reveal its search field.",
+        )
     return None
 
 
@@ -93,12 +114,13 @@ def _is_search_field(element) -> bool:
             attrs.get("aria-label"),
             attrs.get("placeholder"),
             attrs.get("name"),
+            element.id,
         )
         if value
     ).lower()
     return (
         str(element.type or attrs.get("type", "")).lower() == "search"
-        or str(attrs.get("name", "")).lower() in {"q", "query"}
+        or str(attrs.get("name", "")).lower() in {"q", "query", "search"}
         or bool(re.search(r"\b(search|find)\b", hints))
     )
 
