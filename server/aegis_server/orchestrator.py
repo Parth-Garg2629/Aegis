@@ -29,7 +29,9 @@ _FIRST_LINK_GOAL = re.compile(
     re.IGNORECASE,
 )
 _OPEN_WEBSITE_GOAL = re.compile(
-    r"\b(?:open|go\s+to|visit|navigate\s+to)\s+(?:the\s+)?(?P<site>[a-z0-9][a-z0-9.-]*)\s+(?:website|site|homepage)\b",
+    r"^\s*(?:please\s+)?(?:open|go\s+to|visit|navigate\s+to)\s+(?:the\s+)?"
+    r"(?P<site>https?://[^\s<>\"'`]+|(?:www\.)?[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?(?::\d{1,5})?)"
+    r"(?:\s+(?:website|site|homepage))?[.!?]*\s*$",
     re.IGNORECASE,
 )
 _KNOWN_WEBSITE_DOMAINS = {
@@ -155,14 +157,33 @@ def _website_navigation_action(goal: str, context: ContextUpdatePayload) -> Opti
     match = _OPEN_WEBSITE_GOAL.search(goal)
     if not match:
         return None
-    site = match.group("site").strip(".").lower()
-    host = _KNOWN_WEBSITE_DOMAINS.get(site, site if "." in site else f"{site}.com")
+
+    site = match.group("site").rstrip(".,!?;:").strip().lower()
+    if site.startswith(("http://", "https://")):
+        destination = urlsplit(site)
+        if (
+            destination.scheme not in {"http", "https"}
+            or not destination.hostname
+            or destination.username is not None
+            or destination.password is not None
+        ):
+            return None
+        host = destination.hostname.lower()
+        navigation_url = site
+    else:
+        site_without_www = site[4:] if site.startswith("www.") else site
+        host = _KNOWN_WEBSITE_DOMAINS.get(
+            site_without_www,
+            site if "." in site else f"{site}.com",
+        )
+        navigation_url = f"https://{host}/"
+
     current_host = urlsplit(context.sanitized_schema.url).hostname or ""
     if current_host.lower() == host or current_host.lower().endswith(f".{host}"):
         return ActionObject(action_type="done", reasoning="The requested website is already open.")
     return ActionObject(
         action_type="navigate",
-        value=f"https://{host}/",
+        value=navigation_url,
         reasoning="Open the website explicitly requested by the user.",
     )
 

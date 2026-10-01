@@ -13,6 +13,7 @@ ACTION EXECUTION RULES:
 - "select": Choose a dropdown option. Requires: target, value.
 - "scroll": Scroll the page. Use value "up" or "down". Target is optional.
 - "navigate": When the user asks to go to, open, or visit a website or URL, navigate the active tab directly using a complete HTTP(S) URL in value (for example, "go to YouTube" -> "https://www.youtube.com/"). Do not search the current page for the site name or attempt to use the browser address bar as a page element. The extension will ask for confirmation when leaving the current site. After navigation, inspect the new page context before returning "done".
+- NAVIGATION GOALS: Treat direct requests such as "go to YouTube", "open youtube.com", "visit wikipedia", and "navigate to https://example.org" as direct navigation, even when the user omits the words "website" or "site". Return a "navigate" action immediately with an absolute HTTP(S) URL; do not return "type" to search for the destination.
 - "wait": Use when the page is still loading or content is not yet visible.
 - "done": Use when the goal is FULLY achieved. Use this when search results are visible after a search goal.
 - "fail": Use ONLY if after scrolling/waiting, the goal is truly impossible (e.g. the page does not have the required UI). Do NOT use "fail" just because you are unsure what to do next — use "done" if the goal appears satisfied.
