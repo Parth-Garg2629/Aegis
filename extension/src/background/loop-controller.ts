@@ -700,20 +700,34 @@ export class LoopController {
       return { valid: true, reason: '' };
     }
 
-    // Re-extract live DOM
+    // Re-extract live DOM. During an authentication redirect the tab can be
+    // between the identity provider and the destination page for several
+    // seconds. Keep checking that transition before deciding the old target
+    // is stale; only the login detector below can turn it into success.
     let liveSchema: SanitizedSchema | null = null;
     let extractionError: unknown;
-    // Approved form submissions can navigate/reload the tab while the
-    // confirmation UI is open. Give the document a short chance to settle
-    // before treating a transient missing content script as a failed action.
-    for (let attempt = 0; attempt < (this.isLoginGoal() ? 3 : 1); attempt++) {
+    const loginGoal = this.isLoginGoal();
+    const maxAttempts = loginGoal ? 10 : 1;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const { schema } = await this.extractDomFromActiveTab();
         liveSchema = schema;
-        break;
+        if (loginGoal && this.isCompletedLoginRedirect(originalSchema, schema, targetId)) {
+          return {
+            valid: false,
+            reason: 'Login completed while confirmation was pending',
+            loginAlreadyCompleted: true,
+          };
+        }
+
+        const targetStillPresent = schema.elements.some((element) => element.id === targetId);
+        const urlChanged = Boolean(originalSchema.url && schema.url && originalSchema.url !== schema.url);
+        if (!loginGoal || (targetStillPresent && !urlChanged)) break;
       } catch (error) {
         extractionError = error;
-        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+      if (attempt < maxAttempts - 1) {
+        await new Promise((resolve) => setTimeout(resolve, loginGoal ? 450 : 350));
       }
     }
     if (!liveSchema) {
@@ -727,17 +741,6 @@ export class LoopController {
         return { valid: false, reason: 'Login completed after navigation', loginAlreadyCompleted: true };
       }
       return { valid: false, reason: 'Could not re-extract live DOM for validation' };
-    }
-
-    // If authentication redirected the tab while approval was pending, finish
-    // the requested login before checking whether the old page's click target
-    // still exists. The approved click must not be replayed on the new page.
-    if (this.isLoginGoal() && this.isCompletedLoginRedirect(originalSchema, liveSchema, targetId)) {
-      return {
-        valid: false,
-        reason: 'Login completed while confirmation was pending',
-        loginAlreadyCompleted: true,
-      };
     }
 
     // 1. Target must still exist in current DOM

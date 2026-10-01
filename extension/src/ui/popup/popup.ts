@@ -193,7 +193,8 @@ function updateUI(update: SessionStateUpdateMessage): void {
   }
 
   if (state === 'completed') {
-    addLog('Goal achieved ✓', 'success');
+    const loginGoal = /\b(log\s*in|login|sign\s*in|authenticate)\b/i.test(goalInput.value);
+    addLog(loginGoal ? 'Login completed ✓' : 'Goal achieved ✓', 'success');
     setConnected(false);
   } else if (state === 'failed') {
     addLog(update.error ? `Failed: ${update.error}` : 'Session failed', 'error');
