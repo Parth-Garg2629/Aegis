@@ -267,6 +267,13 @@
     .confirm-actions .btn-approve { background: var(--text); color: var(--bg-deep); flex: 1; padding: 10px; border-radius: 6px; border: none; font-weight: 500; cursor: pointer; }
     .confirm-actions .btn-deny { background: transparent; border: 1px solid var(--border); color: var(--text); flex: 1; padding: 10px; border-radius: 6px; font-weight: 500; cursor: pointer; }
     .confirm-actions .btn-deny:hover { background: var(--bg-hover); }
+    .local-input-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+    .local-input-copy { color: var(--text-muted); line-height: 1.45; margin-bottom: 14px; }
+    .local-input-field { width: 100%; padding: 11px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-deep); color: var(--text); margin-bottom: 14px; }
+    .local-input-actions { display: flex; gap: 8px; }
+    .local-input-actions button { flex: 1; padding: 10px; border-radius: 6px; cursor: pointer; }
+    .local-input-submit { background: var(--text); color: var(--bg-deep); border: 0; font-weight: 600; }
+    .local-input-cancel { background: transparent; border: 1px solid var(--border); color: var(--text); }
   </style>
 </head>
 <body>
@@ -452,6 +459,18 @@
         </button>
       </div>
     </div>
+  </div>
+
+  <div class="confirm-overlay" id="local-input-overlay" role="dialog" aria-modal="true" aria-labelledby="local-input-title">
+    <form class="confirm-card" id="local-input-form" autocomplete="off">
+      <div class="local-input-title" id="local-input-title">Enter credentials locally</div>
+      <p class="local-input-copy" id="local-input-label">Your input stays on this device and is sent only to the page you selected.</p>
+      <input class="local-input-field" id="local-input-field" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+      <div class="local-input-actions">
+        <button class="local-input-submit" type="submit">Fill field</button>
+        <button class="local-input-cancel" id="local-input-cancel" type="button">Cancel</button>
+      </div>
+    </form>
   </div>
 </body>
 </html>

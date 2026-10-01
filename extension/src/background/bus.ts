@@ -9,7 +9,8 @@ export type BusMessageType =
   | 'EXTRACT_DOM_RESPONSE'
   | 'EXECUTE_ACTION_REQUEST'
   | 'EXECUTE_ACTION_RESPONSE'
-  | 'CONFIRM_ACTION';
+  | 'CONFIRM_ACTION'
+  | 'LOCAL_INPUT_RESPONSE';
 
 export interface StartSessionMessage {
   type: 'START_SESSION';
@@ -28,7 +29,7 @@ export interface GetSessionStateMessage {
 
 export interface SessionStateUpdateMessage {
   type: 'SESSION_STATE_UPDATE';
-  state: 'idle' | 'running' | 'paused' | 'confirming' | 'completed' | 'failed' | 'cancelled';
+  state: 'idle' | 'running' | 'paused' | 'confirming' | 'input_required' | 'completed' | 'failed' | 'cancelled';
   step: number;
   maxSteps: number;
   lastAction?: string;
@@ -40,6 +41,8 @@ export interface SessionStateUpdateMessage {
     target: string | null;
     riskReason: string;
   };
+  /** Safe field metadata only. Never include the user-entered value. */
+  localInputMeta?: { target: string; label: string; inputType: 'text' | 'password' };
 }
 
 export interface ExtractDomRequestMessage {
@@ -76,9 +79,15 @@ export type BusMessage =
   | ExtractDomResponseMessage
   | ExecuteActionRequestMessage
   | ExecuteActionResponseMessage
-  | ConfirmActionMessage;
+  | ConfirmActionMessage
+  | LocalInputResponseMessage;
 
 export interface ConfirmActionMessage {
   type: 'CONFIRM_ACTION';
   approved: boolean;
+}
+
+export interface LocalInputResponseMessage {
+  type: 'LOCAL_INPUT_RESPONSE';
+  value: string | null;
 }

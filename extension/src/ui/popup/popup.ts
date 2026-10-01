@@ -26,6 +26,11 @@ const confirmTarget    = document.getElementById('confirm-target')    as HTMLEle
 const confirmRiskReason= document.getElementById('confirm-risk-reason') as HTMLElement;
 const approveBtn       = document.getElementById('approve-btn')       as HTMLButtonElement;
 const denyBtn          = document.getElementById('deny-btn')          as HTMLButtonElement;
+const localInputOverlay = document.getElementById('local-input-overlay') as HTMLElement;
+const localInputLabel = document.getElementById('local-input-label') as HTMLElement;
+const localInputField = document.getElementById('local-input-field') as HTMLInputElement;
+const localInputForm = document.getElementById('local-input-form') as HTMLFormElement;
+const localInputCancel = document.getElementById('local-input-cancel') as HTMLButtonElement;
 
 // Make body relatively positioned so the absolute overlay aligns to it
 document.body.style.position = 'relative';
@@ -66,6 +71,7 @@ function setProgress(step: number, max: number): void {
 const STATE_CLASS: Record<string, string> = {
   running:    'running',
   confirming: 'running',   // show as running (amber in overlay makes it clear)
+  input_required: 'running',
   completed:  'completed',
   failed:     'failed',
   cancelled:  'failed',
@@ -85,6 +91,38 @@ function showConfirmOverlay(meta: { actionType: string; target: string | null; r
 function hideConfirmOverlay(): void {
   confirmOverlay.classList.remove('active');
 }
+
+function showLocalInput(meta: NonNullable<SessionStateUpdateMessage['localInputMeta']>): void {
+  localInputLabel.textContent = `Enter ${meta.label} to continue. It stays on this device.`;
+  localInputField.type = meta.inputType;
+  localInputField.value = '';
+  localInputOverlay.classList.add('active');
+  localInputField.focus();
+}
+
+function hideLocalInput(): void {
+  localInputOverlay.classList.remove('active');
+  localInputField.value = '';
+}
+
+function sendLocalInput(value: string | null): void {
+  if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+    chrome.runtime.sendMessage({ type: 'LOCAL_INPUT_RESPONSE', value }).catch(() => {});
+  }
+  hideLocalInput();
+}
+
+localInputForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const value = localInputField.value;
+  if (!value) {
+    localInputField.focus();
+    return;
+  }
+  sendLocalInput(value);
+});
+
+localInputCancel?.addEventListener('click', () => sendLocalInput(null));
 
 function sendConfirmation(approved: boolean): void {
   const msg: ConfirmActionMessage = { type: 'CONFIRM_ACTION', approved };
@@ -117,9 +155,15 @@ function updateUI(update: SessionStateUpdateMessage): void {
   } else {
     hideConfirmOverlay();
   }
+  if (state === 'input_required' && update.localInputMeta) {
+    hideConfirmOverlay();
+    showLocalInput(update.localInputMeta);
+  } else {
+    hideLocalInput();
+  }
 
   // Status label
-  statusLabel.textContent = state === 'confirming' ? 'Confirming…' : state.charAt(0).toUpperCase() + state.slice(1);
+  statusLabel.textContent = state === 'confirming' ? 'Confirming…' : state === 'input_required' ? 'Waiting for your input…' : state.charAt(0).toUpperCase() + state.slice(1);
   statusLabel.className = '';
   if (STATE_CLASS[state]) statusLabel.classList.add(STATE_CLASS[state]);
 
@@ -131,7 +175,7 @@ function updateUI(update: SessionStateUpdateMessage): void {
   setProgress(currentStep, maxStepsGlobal);
 
   // Button state (Approve/Deny handle input while confirming — main buttons stay in their prior state)
-  const running = state === 'running' || state === 'confirming';
+  const running = state === 'running' || state === 'confirming' || state === 'input_required';
   startBtn.disabled    = running;
   cancelBtn.disabled   = !running;
   goalInput.disabled   = running;

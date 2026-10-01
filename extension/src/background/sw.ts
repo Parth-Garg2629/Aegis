@@ -24,6 +24,7 @@ function stateForStorage(update: SessionStateUpdateMessage): SessionStateUpdateM
     lastAction: update.lastAction,
     error: update.error,
     confirmMeta: update.confirmMeta,
+    localInputMeta: update.localInputMeta,
   };
 }
 
@@ -35,7 +36,7 @@ async function restoreLastKnownState(): Promise<void> {
 
     // A restarted MV3 worker has no live controller or socket to resume. Do
     // not display an orphaned running state as though work were continuing.
-    if (candidate.state === 'running' || candidate.state === 'confirming' || candidate.state === 'paused') {
+    if (candidate.state === 'running' || candidate.state === 'confirming' || candidate.state === 'input_required' || candidate.state === 'paused') {
       lastKnownState = {
         ...stateForStorage(candidate),
         state: 'failed',
@@ -99,7 +100,7 @@ chrome.runtime.onInstalled.addListener(() => {
   ensureOffscreenDocument().catch(() => {});
 });
 
-chrome.runtime.onMessage.addListener((message: BusMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: BusMessage, sender, sendResponse) => {
   switch (message.type) {
     case 'START_SESSION': {
       ensureOffscreenDocument().catch(() => {});
@@ -136,6 +137,18 @@ chrome.runtime.onMessage.addListener((message: BusMessage, _sender, sendResponse
       if (loopController) {
         loopController.handleConfirmation(message.approved);
       }
+      sendResponse({ success: true });
+      break;
+    }
+
+    case 'LOCAL_INPUT_RESPONSE': {
+      // Credential text is accepted only from the extension's own popup UI.
+      // Content scripts and page-originated messages cannot submit local input.
+      if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) {
+        sendResponse({ success: false });
+        break;
+      }
+      if (loopController) loopController.handleLocalInput(message.value);
       sendResponse({ success: true });
       break;
     }

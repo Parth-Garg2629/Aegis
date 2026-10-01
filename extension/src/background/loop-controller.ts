@@ -8,7 +8,7 @@ import type {
   SessionCreatedMessage,
   SessionEndPayload,
 } from '@aegis/protocol';
-import { DEFAULT_SERVER_ENDPOINT, slog } from '@aegis/shared';
+import { CONTROL_TOKENS, DEFAULT_SERVER_ENDPOINT, slog } from '@aegis/shared';
 import { captureActiveTab } from './capture';
 import { ensureOffscreenDocument } from './offscreen-manager';
 import { AegisWebSocketClient } from './ws-client';
@@ -29,6 +29,7 @@ export type LoopState =
   | 'awaiting_action'
   | 'executing'
   | 'confirming'       // ← NEW: paused waiting for user approve/deny
+  | 'input_required'
   | 'completed'
   | 'failed'
   | 'cancelled';
@@ -97,6 +98,7 @@ export class LoopController {
 
   // Confirmation flow: resolve = user responded (true=approved, false=denied)
   private pendingConfirmResolver: ((approved: boolean) => void) | null = null;
+  private pendingLocalInputResolver: ((value: string | null) => void) | null = null;
 
   constructor(options: LoopControllerOptions = {}) {
     this.maxSteps = options.maxSteps || 30;
@@ -147,6 +149,7 @@ export class LoopController {
           this.pendingConfirmResolver = null;
           resolve(false);
         }
+        this.resolvePendingLocalInput(null);
         if (this.state !== 'completed' && this.state !== 'failed' && this.state !== 'cancelled' && this.state !== 'idle') {
           this.transition('failed', { error: 'WebSocket disconnected unexpectedly' });
         }
@@ -192,6 +195,12 @@ export class LoopController {
     const resolve = this.pendingConfirmResolver;
     this.pendingConfirmResolver = null;
     resolve(approved);
+  }
+
+  /** Receives sensitive text from the popup over the local extension channel only. */
+  public handleLocalInput(value: string | null): void {
+    if (this.state !== 'input_required' || !this.pendingLocalInputResolver) return;
+    this.resolvePendingLocalInput(typeof value === 'string' ? value : null);
   }
 
   public async start(goal: string, targetTabId?: number): Promise<void> {
@@ -282,6 +291,7 @@ export class LoopController {
       this.pendingConfirmResolver = null;
       resolve(false);
     }
+    this.resolvePendingLocalInput(null);
 
     try {
       this.wsClient.sendSessionEnd('user_cancelled', this.currentStep);
@@ -598,9 +608,36 @@ export class LoopController {
       }
 
       // ── Execute ────────────────────────────────────────────────────────────
+      let actionForExecution = action;
+      let localInputProvided = false;
+      if (action.action_type === 'type' && action.value === CONTROL_TOKENS.NEEDS_LOCAL_INPUT) {
+        const targetElement = domSchema.elements.find((element) => element.id === action.target);
+        const fieldLabel = (targetElement?.label || '').replace(/[\r\n\t]/g, ' ').trim().slice(0, 80);
+        const passwordField = targetElement?.type?.toLowerCase() === 'password' ||
+          /password|passcode|one[- ]?time|verification|recovery|security code/i.test(`${targetElement?.label || ''} ${targetElement?.attributes?.autocomplete || ''}`);
+        const localValue = await this.requestLocalInput({
+          target: action.target || '',
+          label: fieldLabel || (passwordField ? 'Password field' : 'Credential field'),
+          inputType: passwordField ? 'password' : 'text',
+        });
+        if (localValue === null) {
+          this.sendActionResultTracked({
+            step_number: this.currentStep,
+            action_type: 'type',
+            success: false,
+            local_input_status: 'LOCAL_INPUT_CANCELLED',
+          });
+          this.finish('user_cancelled');
+          break;
+        }
+        actionForExecution = { ...action, value: localValue };
+        localInputProvided = true;
+      }
+
       const executionStartedAt = performance.now();
       slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_EXECUTION_START', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, action_type: action.action_type, correlation_id: `${this.wsClient.getSessionId() || 'pending'}:${this.currentStep}`, status: 'started' });
-      const executionResult = await this.executeActionInActiveTab(action);
+      const executionResult = await this.executeActionInActiveTab(actionForExecution);
+      if (localInputProvided) executionResult.local_input_status = 'LOCAL_INPUT_PROVIDED';
       slog.info({ module: 'LOOP_CONTROLLER', event: 'ACTION_EXECUTION_END', session_id: this.wsClient.getSessionId() || undefined, step_number: this.currentStep, action_type: action.action_type, duration_ms: Math.round(performance.now() - executionStartedAt), success: executionResult.success, error_code: executionResult.error_code, status: executionResult.success ? 'success' : 'failed' });
       this.previousResult = executionResult;
 
@@ -979,6 +1016,8 @@ export class LoopController {
 
     if (reason === 'goal_achieved') {
       this.transition('completed');
+    } else if (reason === 'user_cancelled') {
+      this.transition('cancelled');
     } else {
       this.transition('failed', {
         error: errorCode
@@ -1006,7 +1045,7 @@ export class LoopController {
 
   private transition(
     newState: LoopState,
-    meta: { lastAction?: string; reasoning?: string; error?: string; confirmMeta?: ConfirmationMeta } = {},
+    meta: { lastAction?: string; reasoning?: string; error?: string; confirmMeta?: ConfirmationMeta; localInputMeta?: SessionStateUpdateMessage['localInputMeta'] } = {},
   ): void {
     this.state = newState;
     const update: SessionStateUpdateMessage = {
@@ -1022,6 +1061,8 @@ export class LoopController {
                 ? 'idle'
                 : newState === 'confirming'
                   ? 'confirming'
+                  : newState === 'input_required'
+                    ? 'input_required'
                   : 'running',
       step: this.currentStep,
       maxSteps: this.maxSteps,
@@ -1029,8 +1070,27 @@ export class LoopController {
       reasoning: meta.reasoning,
       error: meta.error,
       confirmMeta: meta.confirmMeta,
+      localInputMeta: meta.localInputMeta,
     };
 
     this.onStateChange?.(update);
+  }
+
+  private requestLocalInput(meta: NonNullable<SessionStateUpdateMessage['localInputMeta']>): Promise<string | null> {
+    this.transition('input_required', { lastAction: 'type', localInputMeta: meta });
+    return new Promise((resolve) => {
+      this.pendingLocalInputResolver = resolve;
+      setTimeout(() => {
+        if (this.pendingLocalInputResolver !== resolve) return;
+        this.resolvePendingLocalInput(null);
+      }, 120000);
+    });
+  }
+
+  private resolvePendingLocalInput(value: string | null): void {
+    const resolve = this.pendingLocalInputResolver;
+    if (!resolve) return;
+    this.pendingLocalInputResolver = null;
+    resolve(value);
   }
 }

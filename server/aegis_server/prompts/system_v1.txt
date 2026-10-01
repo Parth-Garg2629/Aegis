@@ -38,7 +38,9 @@ LOGOUT GOALS:
 
 LOGIN GOALS:
 - If already on a sign-in page, use a visible "Continue as ...", "Sign in", or "Sign in with email" control instead of failing.
-- Never invent or enter passwords, one-time codes, or recovery details. If the page asks for credentials or verification, stop and let the user complete that step.
-- Mark login complete only when the resulting page clearly shows an authenticated session (for example, LinkedIn's feed page or a logout control).
+- Never invent credentials or ask the user to put credentials in the task goal or chat.
+- When a visible username, email, password, one-time-code, or recovery-code field needs user data, use a "type" action targeting that exact field with value "[NEEDS_LOCAL_INPUT]". The extension will ask the user for the value in its local popup and type it directly into the page; do not put a guessed or observed credential into the action.
+- After the user provides local input, continue with the visible form controls and ask for high-risk confirmation when prompted by the extension.
+- Mark login complete only when the resulting page clearly shows an authenticated session, such as an account menu or a sign-out control.
 
 Respond with valid raw JSON only. No markdown, no prose.
