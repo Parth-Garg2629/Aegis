@@ -115,6 +115,11 @@ function bundleMlAssetsPlugin() {
 }
 
 export default defineConfig({
+  // Prefer the maintained TypeScript sources when legacy compiled .js files
+  // with the same basename are present beside them under src/.
+  resolve: {
+    extensions: ['.mjs', '.mts', '.ts', '.tsx', '.js', '.jsx', '.json'],
+  },
   plugins: [manifestPlugin(), htmlRelocatePlugin(), bundleMlAssetsPlugin()],
   build: {
     outDir: 'dist',

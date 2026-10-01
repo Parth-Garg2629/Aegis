@@ -555,9 +555,9 @@ export class LoopController {
             action_type: action.action_type,
             success: false,
             error_code: 'E-STALE-TARGET',
-            error_message: liveValidation.reason,
+            error_message: 'Approved action target could not be revalidated',
           });
-          this.finish('agent_failed');
+          this.finish('agent_failed', 'E-STALE-TARGET');
           break;
         }
 
@@ -678,18 +678,38 @@ export class LoopController {
     }
 
     // Re-extract live DOM
-    let liveSchema: SanitizedSchema;
-    try {
-      const { schema } = await this.extractDomFromActiveTab();
-      liveSchema = schema;
-    } catch {
+    let liveSchema: SanitizedSchema | null = null;
+    let extractionError: unknown;
+    // Approved form submissions can navigate/reload the tab while the
+    // confirmation UI is open. Give the document a short chance to settle
+    // before treating a transient missing content script as a failed action.
+    for (let attempt = 0; attempt < (this.isLoginGoal() ? 3 : 1); attempt++) {
+      try {
+        const { schema } = await this.extractDomFromActiveTab();
+        liveSchema = schema;
+        break;
+      } catch (error) {
+        extractionError = error;
+        if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+    }
+    if (!liveSchema) {
+      slog.warn({
+        module: 'LOOP_CONTROLLER',
+        event: 'LIVE_DOM_VALIDATION_DOM_UNAVAILABLE',
+        error_code: this.safeFailureCode(extractionError instanceof Error ? extractionError.message : undefined),
+        step_number: this.currentStep,
+      });
+      if (this.isLoginGoal() && await this.isCompletedLoginRedirectWithoutDom(originalSchema)) {
+        return { valid: false, reason: 'Login completed after navigation', loginAlreadyCompleted: true };
+      }
       return { valid: false, reason: 'Could not re-extract live DOM for validation' };
     }
 
     // If authentication redirected the tab while approval was pending, finish
     // the requested login before checking whether the old page's click target
     // still exists. The approved click must not be replayed on the new page.
-    if (this.isLoginGoal() && this.isCompletedLoginRedirect(originalSchema, liveSchema)) {
+    if (this.isLoginGoal() && this.isCompletedLoginRedirect(originalSchema, liveSchema, targetId)) {
       return {
         valid: false,
         reason: 'Login completed while confirmation was pending',
@@ -728,7 +748,7 @@ export class LoopController {
     return /\b(log\s*in|login|sign\s*in|authenticate)\b/i.test(this.goal);
   }
 
-  private isCompletedLoginRedirect(originalSchema: SanitizedSchema, liveSchema: SanitizedSchema): boolean {
+  private isCompletedLoginRedirect(originalSchema: SanitizedSchema, liveSchema: SanitizedSchema, targetId: string): boolean {
     let originalUrl: URL;
     let liveUrl: URL;
     try {
@@ -742,6 +762,12 @@ export class LoopController {
     const hasPasswordField = visibleControls.some((element) =>
       element.tagName.toLowerCase() === 'input' &&
       String(element.type || element.attributes?.type || '').toLowerCase() === 'password',
+    );
+    const hasVerificationField = visibleControls.some((element) =>
+      /one[- ]?time|verification|security code|authenticator|\botp\b/i.test(
+        [element.label, element.text, element.attributes?.autocomplete, element.attributes?.['aria-label']]
+          .filter(Boolean).join(' '),
+      ),
     );
     const controlText = visibleControls.map((element) => [
       element.label,
@@ -757,16 +783,80 @@ export class LoopController {
       return true;
     }
 
-    if (originalUrl.href === liveUrl.href || hasPasswordField) return false;
-    if (/\b(?:login|log-in|signin|sign-in|auth|oauth|authorize|challenge|checkpoint|verify|consent)\b/i.test(route)) {
-      return false;
-    }
-    const hasLoginPrompt = visibleControls.some((element) =>
+    const hasLoginPrompt = (schema: SanitizedSchema): boolean => schema.elements.some((element) =>
+      element.isVisible && element.isInteractive &&
       /\b(sign\s*in|log\s*in|login|continue\s+with)\b/i.test(
         [element.label, element.text, element.attributes?.['aria-label']].filter(Boolean).join(' '),
       ),
     );
-    return !hasLoginPrompt;
+    const originalHasPasswordField = originalSchema.elements.some((element) =>
+      element.isVisible && element.isInteractive && element.tagName.toLowerCase() === 'input' &&
+      String(element.type || element.attributes?.type || '').toLowerCase() === 'password',
+    );
+    const originalHasLoginPrompt = hasLoginPrompt(originalSchema);
+    const wasShowingLoginUi = originalHasPasswordField || originalHasLoginPrompt ||
+      /\b(?:login|log-in|signin|sign-in|auth|oauth|authorize)\b/i.test(`${originalUrl.hostname}${originalUrl.pathname}`);
+    const isShowingLoginUi = hasPasswordField || hasVerificationField || hasLoginPrompt(liveSchema);
+    const hasLoginError = liveSchema.elements.some((element) =>
+      element.isVisible && element.role?.toLowerCase() === 'alert' &&
+      /incorrect|invalid|wrong password|try again|could not sign|unable to sign/i.test(element.text || ''),
+    );
+
+    if (hasPasswordField || hasVerificationField || hasLoginPrompt(liveSchema) || hasLoginError) return false;
+    if (/\b(?:login|log-in|signin|sign-in|auth|oauth|authorize|challenge|checkpoint|verify|consent)\b/i.test(route)) {
+      // Some sites keep the same auth route after an in-place successful login.
+      // Continue below only when the original sign-in UI has disappeared.
+      if (!(originalUrl.href === liveUrl.href && wasShowingLoginUi && !isShowingLoginUi)) return false;
+    }
+
+    if (originalUrl.href !== liveUrl.href && wasShowingLoginUi) return true;
+
+    // SPA logins often keep the same URL. If the previous page was clearly a
+    // sign-in screen, the approved target vanished, and no login/MFA prompt or
+    // error remains, treat the completed transition as success. This is based
+    // on page state and element ids, never a site-specific rule.
+    const targetDisappeared = !liveSchema.elements.some((element) => element.id === targetId);
+    const originalHadLoginTarget = originalSchema.elements.some((element) => element.id === targetId);
+    const newlyVisibleAccountControl = hasAccountControl && !originalSchema.elements.some((element) =>
+      element.isVisible && /\b(profile|account|user\s+menu|my\s+account)\b|\bme\b/i.test(
+        [element.label, element.text, element.attributes?.['aria-label'], element.attributes?.title].filter(Boolean).join(' '),
+      ),
+    );
+    return wasShowingLoginUi && !isShowingLoginUi &&
+      (newlyVisibleAccountControl || (originalHadLoginTarget && targetDisappeared));
+  }
+
+  private async isCompletedLoginRedirectWithoutDom(originalSchema: SanitizedSchema): Promise<boolean> {
+    if (!this.activeTabId || typeof chrome === 'undefined' || !chrome.tabs?.get) return false;
+    let originalUrl: URL;
+    let currentUrl: URL;
+    try {
+      const tab = await chrome.tabs.get(this.activeTabId);
+      originalUrl = new URL(originalSchema.url);
+      currentUrl = new URL(tab.url || '');
+    } catch {
+      return false;
+    }
+    if (!['http:', 'https:'].includes(currentUrl.protocol) || originalUrl.href === currentUrl.href) return false;
+
+    const authRoute = /\b(?:login|log-in|signin|sign-in|auth|oauth|authorize|challenge|checkpoint|verify|consent)\b/i;
+    const originalWasAuthRoute = authRoute.test(`${originalUrl.hostname}${originalUrl.pathname}`);
+    const currentIsAuthRoute = authRoute.test(`${currentUrl.hostname}${currentUrl.pathname}`);
+    const originalHadCredentialField = originalSchema.elements.some((element) =>
+      element.isVisible && element.isInteractive && element.tagName.toLowerCase() === 'input' &&
+      (/password|email|user|text/i.test(String(element.type || element.attributes?.type || '')) ||
+        /email|username|user name|password|passcode/i.test(`${element.label || ''} ${element.attributes?.autocomplete || ''}`)),
+    );
+    const originalHadSignInControl = originalSchema.elements.some((element) =>
+      element.isVisible && element.isInteractive &&
+      /\b(sign\s*in|log\s*in|login|continue\s+with)\b/i.test(
+        [element.label, element.text, element.attributes?.['aria-label']].filter(Boolean).join(' '),
+      ),
+    );
+    // DOM access can be temporarily unavailable during a cross-origin redirect.
+    // Only infer completion when the prior page clearly was an auth step and
+    // the browser has left all known sign-in/verification routes.
+    return (originalWasAuthRoute || originalHadCredentialField || originalHadSignInControl) && !currentIsAuthRoute;
   }
 
   private sendActionResultTracked(result: ActionResultPayload): void {
