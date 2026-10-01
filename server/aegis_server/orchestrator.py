@@ -31,6 +31,8 @@ _FIRST_LINK_GOAL = re.compile(
 _LOGOUT_GOAL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
 _LOGOUT_CONTROL = re.compile(r"\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b", re.I)
 _PROFILE_MENU_CONTROL = re.compile(r"\b(profile|account|user\s+menu|your\s+account|my\s+account)\b", re.I)
+_LOGIN_GOAL = re.compile(r"\b(log\s*in|login|sign\s*in|authenticate)\b", re.I)
+_LOGIN_CONTROL = re.compile(r"\b(sign\s*in|log\s*in|continue\s+as)\b", re.I)
 
 
 def _search_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
@@ -173,6 +175,74 @@ def _action_targets_logout(action: ActionObject, context: ContextUpdatePayload) 
     return bool(element and _LOGOUT_CONTROL.search(_element_action_text(element)))
 
 
+def _login_fallback(goal: str, context: ContextUpdatePayload) -> Optional[ActionObject]:
+    """Use an explicit sign-in or existing-account continuation control."""
+    if not _LOGIN_GOAL.search(goal):
+        return None
+    candidates = [
+        element
+        for element in context.sanitized_schema.elements
+        if element.isVisible
+        and element.isInteractive
+        and not element.isDisabled
+        and element.tagName.lower() in {"a", "button", "input"}
+    ]
+    # Prefer the visible continuation for an already selected account, then
+    # fall back to the page's explicit email/sign-in route.
+    for pattern in (re.compile(r"^\s*continue\s+as\b", re.I), _LOGIN_CONTROL):
+        candidate = next(
+            (element for element in candidates if pattern.search(_element_action_text(element))),
+            None,
+        )
+        if candidate:
+            return ActionObject(
+                action_type="click",
+                target=candidate.id,
+                reasoning="Use the visible sign-in control.",
+            )
+    return None
+
+
+def _action_targets_login_control(action: ActionObject, context: ContextUpdatePayload) -> bool:
+    if action.action_type != "click" or not action.target:
+        return False
+    element = next(
+        (item for item in context.sanitized_schema.elements if item.id == action.target),
+        None,
+    )
+    return bool(element and _LOGIN_CONTROL.search(_element_action_text(element)))
+
+
+def _login_completion_action(
+    goal: str,
+    context: ContextUpdatePayload,
+    previous_action_was_login: bool,
+) -> Optional[ActionObject]:
+    previous = context.previous_action_result
+    if not (
+        _LOGIN_GOAL.search(goal)
+        and previous_action_was_login
+        and previous
+        and previous.success
+        and previous.action_type == "click"
+    ):
+        return None
+
+    page_host = urlsplit(context.sanitized_schema.url).hostname or ""
+    page_path = urlsplit(context.sanitized_schema.url).path.lower()
+    if not page_host.endswith("linkedin.com"):
+        return None
+    if re.search(r"/feed(?:/|$)", page_path) or any(
+        _LOGOUT_CONTROL.search(_element_action_text(element))
+        for element in context.sanitized_schema.elements
+    ):
+        return ActionObject(
+            action_type="done",
+            reasoning="LinkedIn shows the authenticated session.",
+        )
+    return None
+
+
 def _search_completion_action(
     goal: str,
     context: ContextUpdatePayload,
@@ -280,11 +350,15 @@ class AgentOrchestrator:
                 session.goal,
                 context,
                 session.last_action_was_logout,
+            ) or _login_completion_action(
+                session.goal,
+                context,
+                session.last_action_was_login,
             )
             if action:
                 slog.info(
                     module="ORCHESTRATOR",
-                    event="SEARCH_GOAL_COMPLETED",
+                    event="TASK_COMPLETED_BY_RULE",
                     session_id=session.session_id,
                     step_number=context.step_number,
                 )
@@ -300,12 +374,13 @@ class AgentOrchestrator:
                 fallback = (
                     _search_fallback(session.goal, context)
                     or _logout_fallback(session.goal, context)
+                    or _login_fallback(session.goal, context)
                 )
                 if fallback:
                     action = fallback
                     slog.info(
                         module="ORCHESTRATOR",
-                        event="SEARCH_FALLBACK_APPLIED",
+                        event="TASK_ACTION_FALLBACK_APPLIED",
                         session_id=session.session_id,
                         step_number=context.step_number,
                         target_element_id=fallback.target,
@@ -343,6 +418,7 @@ class AgentOrchestrator:
             session.last_action_was_search = _action_targets_search_field(action, context)
             session.last_action_was_external_link = _action_targets_external_link(action, context)
             session.last_action_was_logout = _action_targets_logout(action, context)
+            session.last_action_was_login = _action_targets_login_control(action, context)
 
             slog.info(
                 module="ORCHESTRATOR",

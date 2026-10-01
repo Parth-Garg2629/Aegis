@@ -36,4 +36,9 @@ LOGOUT GOALS:
 - Do not click unrelated account, security, or delete controls. If logout succeeds, return "done".
 - If the user also says to leave/exit the webpage, treat a successful logout as completing the request unless they specify a destination. Do not guess a destination or close the tab.
 
+LOGIN GOALS:
+- If already on a sign-in page, use a visible "Continue as ...", "Sign in", or "Sign in with email" control instead of failing.
+- Never invent or enter passwords, one-time codes, or recovery details. If the page asks for credentials or verification, stop and let the user complete that step.
+- Mark login complete only when the resulting page clearly shows an authenticated session (for example, LinkedIn's feed page or a logout control).
+
 Respond with valid raw JSON only. No markdown, no prose.
