@@ -4,8 +4,9 @@ import { resolve } from 'path';
 // Manifest content scripts are classic scripts. Build this entry separately as
 // an IIFE so it has no ESM imports when Chrome injects it into a web page.
 export default defineConfig({
+  root: __dirname,
   build: {
-    outDir: 'dist',
+    outDir: resolve(__dirname, 'dist'),
     emptyOutDir: false,
     lib: {
       entry: resolve(__dirname, 'src/content/extractor.ts'),

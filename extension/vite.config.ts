@@ -115,6 +115,7 @@ function bundleMlAssetsPlugin() {
 }
 
 export default defineConfig({
+  root: __dirname,
   // Prefer the maintained TypeScript sources when legacy compiled .js files
   // with the same basename are present beside them under src/.
   resolve: {
@@ -122,7 +123,9 @@ export default defineConfig({
   },
   plugins: [manifestPlugin(), htmlRelocatePlugin(), bundleMlAssetsPlugin()],
   build: {
-    outDir: 'dist',
+    // Keep generated JavaScript beside the manifest/assets regardless of
+    // whether Vite is run from the repository root or this package directory.
+    outDir: resolve(__dirname, 'dist'),
     emptyOutDir: true,
     rollupOptions: {
       input: {
