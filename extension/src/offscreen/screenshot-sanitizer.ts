@@ -7,6 +7,11 @@ export interface SanitizedScreenshotResult {
   failedRegions: number;
 }
 
+// The full WebSocket context is capped at 2 MiB. A data URL expands binary
+// image data by about one third, so cap the image itself at 512 KiB to leave
+// ample room for the DOM and protocol envelope.
+const MAX_SANITIZED_IMAGE_BYTES = 512 * 1024;
+
 // Convert data URL to ImageBitmap
 async function createImageBitmapFromUrl(dataUrl: string): Promise<ImageBitmap> {
   const response = await fetch(dataUrl);
@@ -113,9 +118,33 @@ export async function sanitizeScreenshot(
        fCtx.drawImage(canvas, 0, 0, targetW, targetH);
     }
 
-    // Convert to webp
-    // Note: convertToBlob is async
-    const blob = await finalCanvas.convertToBlob({ type: 'image/webp', quality: 0.50 });
+    // Keep the entire context_update below the server's 2 MiB message limit.
+    // Screenshots are already redacted at this point, so repeated downscaling
+    // and WebP re-encoding cannot expose pixels that were masked above.
+    let outputCanvas = finalCanvas;
+    let blob = await outputCanvas.convertToBlob({ type: 'image/webp', quality: 0.50 });
+    let quality = 0.42;
+    while (blob.size > MAX_SANITIZED_IMAGE_BYTES) {
+      if (outputCanvas.width <= 320 && outputCanvas.height <= 240) {
+        blob = await outputCanvas.convertToBlob({ type: 'image/webp', quality: 0.18 });
+        break;
+      }
+
+      const scale = Math.max(0.5, Math.min(0.8, Math.sqrt(MAX_SANITIZED_IMAGE_BYTES / blob.size) * 0.9));
+      const targetW = Math.max(1, Math.floor(outputCanvas.width * scale));
+      const targetH = Math.max(1, Math.floor(outputCanvas.height * scale));
+      const smallerCanvas = new OffscreenCanvas(targetW, targetH);
+      const smallerCtx = smallerCanvas.getContext('2d', { alpha: false });
+      if (!smallerCtx) throw new Error('Failed to resize sanitized screenshot');
+      smallerCtx.drawImage(outputCanvas, 0, 0, targetW, targetH);
+      outputCanvas = smallerCanvas;
+      blob = await outputCanvas.convertToBlob({ type: 'image/webp', quality });
+      quality = Math.max(0.18, quality - 0.08);
+    }
+
+    if (blob.size > MAX_SANITIZED_IMAGE_BYTES) {
+      throw new Error('Sanitized screenshot exceeds the safe message size limit');
+    }
     
     // Read blob as data URL
     const reader = new FileReader();
@@ -123,6 +152,15 @@ export async function sanitizeScreenshot(
       reader.onloadend = () => resolve(reader.result as string);
       reader.onerror = reject;
       reader.readAsDataURL(blob);
+    });
+
+    slog.info({
+      module: 'SCREENSHOT_SANITIZER',
+      event: 'SANITIZED_IMAGE_ENCODED',
+      screenshot_payload_bytes: sanitizedDataUrl.length,
+      screenshot_width: outputCanvas.width,
+      screenshot_height: outputCanvas.height,
+      redacted_regions: redactedRegions,
     });
 
     return {

@@ -12,6 +12,9 @@ import type {
   SessionInitMessage,
 } from '@aegis/protocol';
 import { DEFAULT_SERVER_ENDPOINT, slog, type Sanitized } from '@aegis/shared';
+import { MINIMAL_WEBP_BASE64 } from './capture';
+
+const MAX_CONTEXT_MESSAGE_BYTES = 2 * 1024 * 1024 - 32 * 1024;
 
 export interface WebSocketClientCallbacks {
   onSessionCreated?: (msg: SessionCreatedMessage) => void;
@@ -170,14 +173,93 @@ export class AegisWebSocketClient {
       throw new Error('Cannot send context_update without an active session ID');
     }
 
-    const msg: ContextUpdateMessage = {
+    let msg: ContextUpdateMessage = {
       type: 'context_update',
       session_id: this.sessionId,
       timestamp: new Date().toISOString(),
       protocol_version: '1.0',
       payload,
     };
-    this.send(msg);
+    let serialized = JSON.stringify(msg);
+    let messageBytes = new TextEncoder().encode(serialized).byteLength;
+    if (messageBytes > MAX_CONTEXT_MESSAGE_BYTES) {
+      // The DOM is already sanitized and is sufficient for element targeting.
+      // Drop only the sanitized screenshot when a large page would exceed the
+      // gateway's message limit; this prevents the server from closing WS.
+      msg = {
+        ...msg,
+        payload: {
+          ...payload,
+          sanitized_screenshot: MINIMAL_WEBP_BASE64,
+          screenshot_format: 'webp',
+        },
+      };
+      serialized = JSON.stringify(msg);
+      messageBytes = new TextEncoder().encode(serialized).byteLength;
+
+      if (messageBytes > MAX_CONTEXT_MESSAGE_BYTES) {
+        const elements = payload.sanitized_schema.elements;
+        const elementPriority = (element: (typeof elements)[number]): number => {
+          const attrs = element.attributes || {};
+          const hints = [element.label, element.text, attrs['aria-label'], attrs.placeholder, attrs.type]
+            .filter(Boolean).join(' ').toLowerCase();
+          if (/\b(search|find)\b/.test(hints)) return 3;
+          if (/\b(log\s*out|logout|sign\s*out|signout|log\s*in|login|sign\s*in|account|profile)\b/.test(hints)) return 2;
+          if (['input', 'button', 'textarea', 'select'].includes(element.tagName.toLowerCase())) return 1;
+          return 0;
+        };
+        const rankedIndexes = elements
+          .map((element, index) => ({ index, priority: elementPriority(element) }))
+          .sort((a, b) => b.priority - a.priority || a.index - b.index);
+
+        let keepCount = elements.length;
+        while (messageBytes > MAX_CONTEXT_MESSAGE_BYTES && keepCount > 0) {
+          keepCount = Math.floor(keepCount * 0.75);
+          const retained = new Set(rankedIndexes.slice(0, keepCount).map(({ index }) => index));
+          const boundedElements = elements
+            .filter((_element, index) => retained.has(index))
+            .map((element) => ({
+              ...element,
+              label: element.label?.slice(0, 160),
+              text: element.text?.slice(0, 160),
+              value: element.value?.slice(0, 160),
+              attributes: Object.fromEntries(
+                Object.entries(element.attributes || {}).map(([key, value]) => [
+                  key,
+                  typeof value === 'string' ? value.slice(0, 160) : value,
+                ]),
+              ),
+            }));
+          const retainedIds = new Set(boundedElements.map((element) => element.id));
+          msg = {
+            ...msg,
+            payload: {
+              ...msg.payload,
+              sanitized_schema: {
+                ...payload.sanitized_schema,
+                title: payload.sanitized_schema.title.slice(0, 200),
+                elements: boundedElements,
+                forms: (payload.sanitized_schema.forms || [])
+                  .slice(0, 100)
+                  .map((form) => ({ ...form, elementIds: form.elementIds.filter((id) => retainedIds.has(id)) }))
+                  .filter((form) => form.elementIds.length > 0),
+              },
+            },
+          };
+          serialized = JSON.stringify(msg);
+          messageBytes = new TextEncoder().encode(serialized).byteLength;
+        }
+      }
+      slog.warn({
+        module: 'WS_CLIENT',
+        event: 'CONTEXT_SCREENSHOT_DROPPED_FOR_SIZE',
+        session_id: this.sessionId,
+        step_number: payload.step_number,
+        message_bytes: messageBytes,
+        status: 'degraded',
+      });
+    }
+    this.send(msg, serialized);
   }
 
   public sendActionResult(result: ActionResultPayload): void {
@@ -237,11 +319,11 @@ export class AegisWebSocketClient {
     this.send(msg);
   }
 
-  private send(msg: unknown): void {
+  private send(msg: unknown, serialized?: string): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket is not connected');
     }
-    this.ws.send(JSON.stringify(msg));
+    this.ws.send(serialized ?? JSON.stringify(msg));
   }
 
   public disconnect(): void {
