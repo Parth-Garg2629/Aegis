@@ -909,8 +909,15 @@ export class LoopController {
     const hasSignOutControl = /\b(log\s*out|logout|sign\s*out|signout|log\s*off)\b/i.test(controlText);
     const hasAccountControl = /\b(profile|account|user\s+menu|my\s+account)\b|\bme\b/i.test(controlText);
     const hasAuthenticatedNavigation = /\b(messages?|messaging|notifications?|my network|jobs|dashboard|workspace|projects|feed)\b/i.test(controlText);
+    const isYouTube = /(^|\.)youtube\.com$/i.test(liveUrl.hostname);
+    const hasYouTubeAuthenticatedNavigation = isYouTube &&
+      /\b(shorts|subscriptions|library|history|your channel|your videos)\b/i.test(controlText);
     const isAuthenticatedRoute = /\/(?:feed|dashboard)(?:\/|$)/i.test(liveUrl.pathname);
-    if (hasSignOutControl || isAuthenticatedRoute || (hasAccountControl && hasAuthenticatedNavigation && !hasPasswordField)) {
+    if (hasSignOutControl || isAuthenticatedRoute || (
+      hasAccountControl &&
+      (hasAuthenticatedNavigation || hasYouTubeAuthenticatedNavigation) &&
+      !hasPasswordField
+    )) {
       return true;
     }
 
@@ -925,7 +932,10 @@ export class LoopController {
       String(element.type || element.attributes?.type || '').toLowerCase() === 'password',
     );
     const originalHasLoginPrompt = hasLoginPrompt(originalSchema);
+    const originalWasGoogleAccountChooser = originalUrl.hostname.toLowerCase() === 'accounts.google.com' &&
+      /\/signin\/accountchooser(?:\/|$)/i.test(originalUrl.pathname);
     const wasShowingLoginUi = originalHasPasswordField || originalHasLoginPrompt ||
+      originalWasGoogleAccountChooser ||
       /\b(?:login|log-in|signin|sign-in|auth|oauth|authorize)\b/i.test(`${originalUrl.hostname}${originalUrl.pathname}`);
     const isShowingLoginUi = hasPasswordField || hasVerificationField || hasLoginPrompt(liveSchema);
     const hasLoginError = liveSchema.elements.some((element) =>
